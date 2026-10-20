@@ -1,6 +1,28 @@
-> Detalla en esta sección los prompts principales utilizados durante la creación del proyecto, que justifiquen el uso de asistentes de código en todas las fases del ciclo de vida del desarrollo. Esperamos un máximo de 3 por sección, principalmente los de creación inicial o  los de corrección o adición de funcionalidades que consideres más relevantes.
-Puedes añadir adicionalmente la conversación completa como link o archivo adjunto si así lo consideras
+# Prompts.md — LibroAbierto
 
+## Flujo de trabajo con IA
+
+### Herramientas y modelos
+| Herramienta / modelo | Uso |
+|---|---|
+| Gemini (chat) | Ideación del producto y exploración de alternativas de arquitectura |
+| Claude Opus (chat) | Revisión crítica del concepto, recorte del alcance del MVP y redacción de la documentación técnica (Entrega 1) |
+| _[completar]_ | Implementación (p. ej. Claude Code / Cursor con Sonnet) — Entrega 2 |
+
+### Skills, subagentes, rules y comandos personalizados
+_[Completar en la Entrega 2: reglas del repo (CLAUDE.md / .cursorrules), comandos, subagentes de testing o revisión.]_
+
+### Ajustes humanos sobre el output de la IA
+Durante la ideación, la propuesta inicial generada con Gemini se revisó y corrigió en estos puntos:
+1. **Datos personales fuera de IPFS.** La propuesta original guardaba los datos personales del denunciante cifrados dentro del JSON en IPFS. Se descartó: un dato cifrado sigue siendo dato personal, una filtración futura de la clave lo expondría para siempre y no existe forma de cumplir con el derecho de supresión de la [Ley 25.326 (art. 16)](https://servicios.infoleg.gob.ar/infolegInternet/anexos/60000-64999/64790/texact.htm). Ahora los datos personales viven solo en PostgreSQL y on-chain va únicamente el hash.
+2. **No persistir el token de sesión de MiBA**, que la propuesta incluía dentro del payload.
+3. **Integraciones estatales simuladas.** MiBA y Trámites a Distancia no exponen APIs abiertas a terceros, así que en el MVP se reemplazan por mocks documentados.
+4. **Relayer en lugar de wallet por usuario.** Se descartó account abstraction o Privy para el MVP: agregan complejidad sin aportar al flujo principal.
+5. **Moderación y difamación.** Se agregó identidad verificada (simulada) y el derecho a respuesta de la empresa (HU-05).
+6. **Recorte de alcance.** Quedaron fuera del MVP el clustering de reclamos, BFA en producción y el dimensionamiento de hardware para inferencia on-premise.
+7. **El LLM solo procesa contenido público**, lo que permite usar un proveedor por API en el despliegue sin exponer datos personales.
+
+---
 
 ## Índice
 
@@ -16,110 +38,65 @@ Puedes añadir adicionalmente la conversación completa como link o archivo adju
 
 ## 1. Descripción general del producto
 
-**Prompt 1:**
+**Prompt 1** (Gemini — ideación)
+```
+Quiero pensar en construir una dapp. Que sea para usar como libro de queja.
+```
 
-**Prompt 2:**
+**Prompt 2** (Gemini — integración con el Estado)
+```
+Estoy a la vez pensando en integrarlo con defensa del consumidor de CABA.
+```
 
-**Prompt 3:**
-
----
+**Prompt 3** (Gemini — análisis de mercado)
+```
+Hay un proyecto este o estoy creando yo algo?
+```
 
 ## 2. Arquitectura del Sistema
 
-### **2.1. Diagrama de arquitectura:**
+**Prompt 1** (Gemini — elección de red)
+```
+Aca la consulta es si sirve usar los Blockchain actuales o es mejor otro tipo?
+```
 
-**Prompt 1:**
+**Prompt 2** (Gemini — IA en el producto)
+```
+Podemos agregar un llm que ayude en el trabajo del gobierno?
+```
 
-**Prompt 2:**
+**Prompt 3** (Claude — revisión crítica)
+```
+[Se compartió el PDF de la conversación con Gemini]
+Este es el concepto que se me ocurrió
+```
+Resultado: revisión del diseño (ver "Ajustes humanos"), propuesta de MVP con 4 historias must-have y 2 should-have, y stack.
 
-**Prompt 3:**
+## 3. Modelo de Datos
 
-### **2.2. Descripción de componentes principales:**
+**Prompt 1** (Gemini)
+```
+Ayudame a definir la estructura del JSON y de la base de datos (qué va a IPFS, qué va cifrado, y qué se manda a CABA).
+```
 
-**Prompt 1:**
+**Prompt 2** (Claude)
+```
+si dale
+```
+(en respuesta a la propuesta de armar historias de usuario y el esqueleto del Readme). Generó el modelo de datos de la sección 3 del Readme, ya corregido según la revisión anterior.
 
-**Prompt 2:**
+## 4. Especificación de la API
 
-**Prompt 3:**
+**Prompt 1** (Claude) — generada en la misma sesión que el modelo de datos.
 
-### **2.3. Descripción de alto nivel del proyecto y estructura de ficheros**
+## 5. Historias de Usuario
 
-**Prompt 1:**
+**Prompt 1** (Claude) — generadas en la misma sesión, a partir del alcance MVP acordado.
 
-**Prompt 2:**
+## 6. Tickets de Trabajo
 
-**Prompt 3:**
+**Prompt 1** (Claude) — generados en la misma sesión.
 
-### **2.4. Infraestructura y despliegue**
+## 7. Pull Requests
 
-**Prompt 1:**
-
-**Prompt 2:**
-
-**Prompt 3:**
-
-### **2.5. Seguridad**
-
-**Prompt 1:**
-
-**Prompt 2:**
-
-**Prompt 3:**
-
-### **2.6. Tests**
-
-**Prompt 1:**
-
-**Prompt 2:**
-
-**Prompt 3:**
-
----
-
-### 3. Modelo de Datos
-
-**Prompt 1:**
-
-**Prompt 2:**
-
-**Prompt 3:**
-
----
-
-### 4. Especificación de la API
-
-**Prompt 1:**
-
-**Prompt 2:**
-
-**Prompt 3:**
-
----
-
-### 5. Historias de Usuario
-
-**Prompt 1:**
-
-**Prompt 2:**
-
-**Prompt 3:**
-
----
-
-### 6. Tickets de Trabajo
-
-**Prompt 1:**
-
-**Prompt 2:**
-
-**Prompt 3:**
-
----
-
-### 7. Pull Requests
-
-**Prompt 1:**
-
-**Prompt 2:**
-
-**Prompt 3:**
+_Pendiente (Entrega 2 y final)._
