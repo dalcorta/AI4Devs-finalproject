@@ -23,7 +23,7 @@ Libro de quejas de consumo público y verificable: el contenido público de cada
 | Carpeta | Stack | Estado |
 |---|---|---|
 | `contracts/` | Solidity 0.8.24, Foundry, OpenZeppelin 5 (vía npm) | Implementado: `ComplaintRegistry` |
-| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | En curso: hash canónico (`shared/hashing`) |
+| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | En curso: hash canónico (`shared/hashing`), worker de publicación con puertos (`complaint`, `anchoring`); faltan adaptadores reales |
 | `frontend/` | Next.js, TypeScript, viem | Pendiente |
 | `shared/test-vectors/` | JSON | Vectores del hash canónico, usados por backend y frontend |
 

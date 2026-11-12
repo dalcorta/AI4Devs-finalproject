@@ -156,3 +156,26 @@ Resultado:
 1. **Vectores con oráculos independientes.** Para no generar los valores esperados con el mismo código que se prueba, la IA escribió a mano la forma canónica de cada vector, la contrastó con la librería `canonicalize` de npm (la que usará el frontend) y calculó cada hash con `cast keccak` de Foundry. Los 5 coincidieron.
 2. **Versiones consultadas, no inventadas.** Las versiones de Spring Boot, web3j y la librería JCS se leyeron de Maven Central antes de escribir el `pom.xml`; se eligió Spring Boot 3.5.16 porque el readme fija la serie 3 aunque ya existe la 4.
 3. **Tests primero, con la herramienta como límite.** Los tests se escribieron antes que `CanonicalHasher`, pero JDK y Maven no estaban instalados y su instalación pedía `sudo`, que la IA no puede usar: el desarrollador los instaló. Como no se pudo ver la fase roja antes de implementar, se hizo después a propósito: se rompió el hash (sin canonicalizar) y los 5 tests de hash fallaron; al restaurarlo, los 12 volvieron a pasar.
+
+---
+
+## Implementación — Worker de publicación (Claude Code)
+
+**Prompt**
+```
+Commitear y seguir
+```
+
+Resultado (dominio y aplicación del módulo `complaint`, sin infraestructura todavía):
+- `Queja` con su `AnchorStatus` (`PENDIENTE → ENVIADA`) y `DocumentoPublico`, que arma el JSON de IPFS desde una lista explícita de campos.
+- Puertos `QuejaRepository`, `IpfsGateway` y `BlockchainGateway` (este último en el módulo `anchoring`, como fija el readme).
+- `PublicarQuejasPendientes`, el worker del patrón outbox: publica en IPFS, persiste `ipfs_cid` y `content_hash`, envía la transacción y marca `ENVIADA`.
+- 10 tests nuevos (22 en total, todos pasan): 4 del documento público y 6 del worker con dobles en memoria de IPFS, la cadena y el repositorio.
+
+**Verificación y ajustes humanos**
+1. **Tests en rojo antes de implementar.** Esta vez sí: los tests se escribieron primero y fallaron por no compilar (no existían las clases); recién después se implementó.
+2. **Privacidad comprobada por test, no por convención.** El documento se arma con una lista blanca de campos y un test verifica las claves exactas del JSON y que el id del denunciante no aparezca. Otro test usa el ejemplo del readme y exige el mismo hash que el vector compartido, así el documento real queda atado a lo que verificará el frontend.
+3. **Determinismo en reintentos.** `registrada_en` se trunca a segundos: si no, un reintento podría producir otro JSON y otro hash para la misma queja. El test lo cubre construyendo la queja con microsegundos.
+4. **La decisión clave del diseño, protegida por un test.** El `content_hash` se persiste *antes* de enviar la transacción, porque es la clave con la que el listener encontrará la queja. Para confirmar que el test protege esa decisión, se quitó a propósito ese guardado: el test falló, y al restaurarlo volvió a pasar.
+5. **Infraestructura ausente, diseño hexagonal aprovechado.** No hay Docker, PostgreSQL ni IPFS en la máquina. Gracias a los puertos, la lógica del worker se probó entera con dobles; los adaptadores reales quedan para el paso siguiente.
+6. **Riesgo identificado, pendiente de resolver.** Si la transacción sale pero falla el guardado de `ENVIADA`, el reintento anclaría la misma queja dos veces. La mitigación propuesta es que el contrato rechace un `contentHash` ya registrado y que el adaptador Web3j trate ese rechazo como éxito.
