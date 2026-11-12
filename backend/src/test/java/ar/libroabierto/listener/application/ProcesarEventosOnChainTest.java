@@ -29,18 +29,16 @@ class ProcesarEventosOnChainTest {
     private RepositorioEnMemoria repositorio;
     private CadenaFalsa cadena;
     private CheckpointEnMemoria checkpoint;
-    private TriageEspia triage;
 
     @BeforeEach
     void setUp() {
         repositorio = new RepositorioEnMemoria();
         cadena = new CadenaFalsa();
         checkpoint = new CheckpointEnMemoria();
-        triage = new TriageEspia();
     }
 
     @Test
-    void confirmaLaQuejaCorrectaPorContentHashYDisparaElTriage() {
+    void confirmaLaQuejaCorrectaPorContentHash() {
         Queja a = repositorio.agregar(enviada(HASH_A));
         Queja b = repositorio.agregar(enviada(HASH_B));
         cadena.emitir(evento(1, HASH_B, 5));
@@ -54,12 +52,11 @@ class ProcesarEventosOnChainTest {
         assertThat(repositorio.actual(b.id()).bloqueConfirmacion()).isEqualTo(5L);
         assertThat(repositorio.actual(a.id()).anchorStatus()).isEqualTo(AnchorStatus.ENVIADA);
         assertThat(repositorio.guardadas).containsExactly(b.id());
-        assertThat(triage.disparados).containsExactly(b.id());
         assertThat(checkpoint.valor).isEqualTo(OptionalLong.of(5));
     }
 
     @Test
-    void reprocesarLosMismosEventosNoReescribeNiDuplicaElTriage() {
+    void reprocesarLosMismosEventosNoReescribeLaQueja() {
         Queja a = repositorio.agregar(enviada(HASH_A));
         cadena.emitir(evento(1, HASH_A, 3));
         cadena.bloqueActual = 3;
@@ -73,7 +70,6 @@ class ProcesarEventosOnChainTest {
         assertThat(replay.ignorados()).isEqualTo(1);
         assertThat(repositorio.actual(a.id()).onchainId()).isEqualTo(1L);
         assertThat(repositorio.guardadas).hasSize(1);
-        assertThat(triage.disparados).containsExactly(a.id());
     }
 
     @Test
@@ -147,32 +143,16 @@ class ProcesarEventosOnChainTest {
         assertThatThrownBy(() -> listener(0, 0, 100).ejecutar()).isInstanceOf(IllegalStateException.class);
         assertThat(checkpoint.valor).isEmpty();
         assertThat(repositorio.actual(a.id()).anchorStatus()).isEqualTo(AnchorStatus.ENVIADA);
-        assertThat(triage.disparados).isEmpty();
 
         repositorio.fallar = false;
         listener(0, 0, 100).ejecutar();
         assertThat(checkpoint.valor).isEqualTo(OptionalLong.of(3));
         assertThat(repositorio.actual(a.id()).anchorStatus()).isEqualTo(AnchorStatus.CONFIRMADA);
-        assertThat(triage.disparados).containsExactly(a.id());
-    }
-
-    @Test
-    void unFalloDelTriageNoDeshaceLaConfirmacionNiFrenaElCheckpoint() {
-        Queja a = repositorio.agregar(enviada(HASH_A));
-        cadena.emitir(evento(1, HASH_A, 3));
-        cadena.bloqueActual = 3;
-        triage.fallar = true;
-
-        listener(0, 0, 100).ejecutar();
-
-        assertThat(repositorio.actual(a.id()).anchorStatus()).isEqualTo(AnchorStatus.CONFIRMADA);
-        assertThat(repositorio.guardadas).containsExactly(a.id());
-        assertThat(checkpoint.valor).isEqualTo(OptionalLong.of(3));
     }
 
     private ProcesarEventosOnChain listener(long bloqueInicial, int confirmaciones, int maxBloquesPorLote) {
-        return new ProcesarEventosOnChain(repositorio, cadena, checkpoint, triage,
-                bloqueInicial, confirmaciones, maxBloquesPorLote);
+        return new ProcesarEventosOnChain(repositorio, cadena, checkpoint, bloqueInicial, confirmaciones,
+                maxBloquesPorLote);
     }
 
     private static EventoQuejaRegistrada evento(long onchainId, String contentHash, long bloque) {
@@ -265,19 +245,6 @@ class ProcesarEventosOnChainTest {
         public void guardar(long bloque) {
             valor = OptionalLong.of(bloque);
             historial.add(bloque);
-        }
-    }
-
-    static class TriageEspia implements DisparadorTriage {
-        final List<UUID> disparados = new ArrayList<>();
-        boolean fallar;
-
-        @Override
-        public void quejaConfirmada(UUID quejaId) {
-            if (fallar) {
-                throw new IllegalStateException("Triage no disponible");
-            }
-            disparados.add(quejaId);
         }
     }
 }

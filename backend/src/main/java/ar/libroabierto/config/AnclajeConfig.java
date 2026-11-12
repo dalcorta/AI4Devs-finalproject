@@ -7,10 +7,8 @@ import ar.libroabierto.complaint.application.PublicarQuejasPendientes;
 import ar.libroabierto.complaint.application.QuejaRepository;
 import ar.libroabierto.complaint.infrastructure.KuboIpfsGateway;
 import ar.libroabierto.listener.application.CheckpointRepository;
-import ar.libroabierto.listener.application.DisparadorTriage;
 import ar.libroabierto.listener.application.FuenteDeEventos;
 import ar.libroabierto.listener.application.ProcesarEventosOnChain;
-import ar.libroabierto.listener.infrastructure.TriageSinImplementar;
 import ar.libroabierto.listener.infrastructure.Web3jFuenteDeEventos;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -52,15 +50,10 @@ public class AnclajeConfig {
     }
 
     @Bean
-    DisparadorTriage disparadorTriage() {
-        return new TriageSinImplementar();
-    }
-
-    @Bean
     ProcesarEventosOnChain procesarEventosOnChain(QuejaRepository repositorio, FuenteDeEventos fuente,
-            CheckpointRepository checkpoint, DisparadorTriage triage, LibroAbiertoProperties props) {
+            CheckpointRepository checkpoint, LibroAbiertoProperties props) {
         LibroAbiertoProperties.Listener listener = props.listener();
-        return new ProcesarEventosOnChain(repositorio, fuente, checkpoint, triage,
+        return new ProcesarEventosOnChain(repositorio, fuente, checkpoint,
                 listener.bloqueInicial(), listener.confirmaciones(), listener.maxBloquesPorLote());
     }
 }

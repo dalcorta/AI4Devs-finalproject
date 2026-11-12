@@ -187,6 +187,31 @@ class JpaQuejaRepositoryTest {
         assertThat(repositorio.pendientesDeAnclaje()).isEmpty();
     }
 
+    @Test
+    void confirmadasSinTriageDevuelveSoloLasConfirmadasQueTodaviaNoTienenTriage() {
+        UUID sinTriage = confirmada("2026-10-18T12:00:00Z", 1);
+        UUID conTriage = confirmada("2026-10-18T11:00:00Z", 2);
+        queja("PENDIENTE", null, "2026-10-18T10:00:00Z");
+        queja("ENVIADA", null, "2026-10-18T09:00:00Z");
+        jdbc.update("""
+                INSERT INTO triage (id, queja_id, estado, modelo, intentos)
+                VALUES (?, ?, 'MANUAL', 'modelo', 3)""", UUID.randomUUID(), conTriage);
+        UUID otraSinTriage = confirmada("2026-10-18T13:00:00Z", 3);
+
+        List<Queja> pendientes = repositorio.confirmadasSinTriage(10);
+
+        assertThat(pendientes).extracting(Queja::id).containsExactly(sinTriage, otraSinTriage);
+        assertThat(pendientes.get(0).empresa().cuit()).isEqualTo("30712345678");
+        assertThat(repositorio.confirmadasSinTriage(1)).extracting(Queja::id).containsExactly(sinTriage);
+    }
+
+    private UUID confirmada(String creadaEn, long onchainId) {
+        UUID id = queja("PENDIENTE", null, creadaEn);
+        jdbc.update("UPDATE queja SET content_hash = ?, ipfs_cid = 'bafy-doc', anchor_status = 'CONFIRMADA', "
+                + "onchain_id = ? WHERE id = ?", String.format("0x%064x", onchainId), onchainId, id);
+        return id;
+    }
+
     private void sincronizar() {
         em.flush();
         em.clear();

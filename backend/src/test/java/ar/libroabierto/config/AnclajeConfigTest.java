@@ -58,7 +58,12 @@ class AnclajeConfigTest {
                     "libroabierto.listener.intervalo=PT5S",
                     "libroabierto.listener.bloque-inicial=0",
                     "libroabierto.listener.confirmaciones=0",
-                    "libroabierto.listener.max-bloques-por-lote=2000");
+                    "libroabierto.listener.max-bloques-por-lote=2000",
+                    "libroabierto.triage.habilitado=false",
+                    "libroabierto.triage.intervalo=PT10S",
+                    "libroabierto.triage.modelo=claude-opus-5-5",
+                    "libroabierto.triage.lote=10",
+                    "libroabierto.triage.api-key=");
 
     @Test
     void sinClaveDelRelayerLaAplicacionNoArranca() {

@@ -12,7 +12,7 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 @ConfigurationProperties("libroabierto")
 public record LibroAbiertoProperties(@Valid @NotNull Ipfs ipfs, @Valid @NotNull Blockchain blockchain,
-        @Valid @NotNull Worker worker, @Valid @NotNull Listener listener) {
+        @Valid @NotNull Worker worker, @Valid @NotNull Listener listener, @Valid @NotNull Triage triage) {
 
     public record Ipfs(@NotBlank String apiUrl) {
     }
@@ -37,5 +37,20 @@ public record LibroAbiertoProperties(@Valid @NotNull Ipfs ipfs, @Valid @NotNull 
      */
     public record Listener(boolean habilitado, @NotNull Duration intervalo, @PositiveOrZero long bloqueInicial,
             @PositiveOrZero int confirmaciones, @Positive int maxBloquesPorLote) {
+    }
+
+    /**
+     * @param modelo modelo de Claude que clasifica las quejas
+     * @param lote cuántas quejas toma cada pasada del worker
+     * @param apiKey clave de la API de Anthropic; obligatoria si el triage está habilitado
+     */
+    public record Triage(boolean habilitado, @NotNull Duration intervalo, @NotBlank String modelo, @Positive int lote,
+            String apiKey) {
+
+        @Override
+        public String toString() {
+            return "Triage[habilitado=" + habilitado + ", intervalo=" + intervalo + ", modelo=" + modelo + ", lote="
+                    + lote + ", apiKey=***]";
+        }
     }
 }

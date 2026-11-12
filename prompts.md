@@ -308,3 +308,56 @@ Resultado:
 6. **Pendientes conocidos.**
    - `StatusChanged` todavía no se procesa, porque el backend aún no tiene el flujo del funcionario que cambia estados.
    - Una transacción minada pero revertida sigue dejando la queja `ENVIADA`; falta pasarla a `FALLIDA`.
+
+---
+
+## Implementación — Triage con LLM, Ticket 5 (Claude Code)
+
+**Prompt**
+```
+Sí, seguir
+```
+
+Antes de escribir código, Claude Code señaló tres decisiones que el readme dejaba abiertas y las preguntó:
+- **Proveedor:** se eligió Claude (Anthropic).
+- **Dónde guardar el "Triage manual":** se eligió un estado en la tabla `triage`.
+- **Cómo llega una queja confirmada al triage:** se eligió un worker outbox en lugar de que el listener lo dispare.
+
+Resultado:
+- Dominio `triage`: `Triage` (`SUGERIDO` o `MANUAL`), `Prioridad` y `ArticulosLey24240`, la lista cerrada de artículos con su tema.
+- Aplicación:
+  - `PromptTriage` arma el pedido con el `DocumentoPublico` de la queja delimitado entre `<queja>` y `</queja>`.
+  - `ValidadorSalidaTriage` hace tres cosas:
+    - valida contra el JSON Schema `salida-triage.schema.json` con networknt;
+    - exige un resumen de 3 líneas como máximo;
+    - descarta los artículos que no están en la lista cerrada.
+  - `TriarQuejasConfirmadas`, el worker outbox: hace 1 intento más 2 reintentos y, si ninguna salida es válida, guarda un triage `MANUAL`. Si el proveedor no responde, no guarda nada.
+  - Puertos `LlmClient`, `QuejasParaTriage` y `TriageRepository`.
+- Infraestructura:
+  - `AnthropicLlmClient` usa el SDK oficial `anthropic-java` 3.3.0 con `claude-opus-5-5`, salida estructurada (`output_config.format` con el esquema), effort `medium` explícito y el fallback del servidor ante rechazos (`fallbacks: "default"`).
+  - `JpaTriageRepository` guarda un triage por queja y conserva el primero.
+  - `TriageScheduler` y `TriageConfig`: con el triage habilitado y sin `ANTHROPIC_API_KEY`, la aplicación no arranca.
+- Migración `V3`: la tabla `triage` gana `estado` e `intentos`, y los campos del LLM solo pueden ser nulos en `MANUAL`.
+- El listener ya no llama al triage: se quitó `DisparadorTriage`.
+- El test de aceptación ahora recorre PENDIENTE → ENVIADA → CONFIRMADA → triage, con un LLM simulado. Comprueba que el LLM recibió el CUIT de la empresa y nunca el nombre, el email ni el teléfono del denunciante, y que reprocesar los eventos no genera un segundo triage ni una segunda llamada al LLM.
+- 108 tests del backend, 0 fallidos, 0 omitidos.
+
+**Verificación y ajustes humanos**
+1. **Las decisiones de diseño se preguntaron.** El readme no decía dónde se guarda el "Triage manual" ni qué proveedor usar. Se preguntó antes de escribir los tests, porque las respuestas cambiaban qué se testeaba. El readme se actualizó con lo elegido.
+2. **Una diferencia con el readme, señalada sin cambiarlo.** El readme nombra Spring AI como cliente. Se usó el SDK oficial de Anthropic: el adaptador queda detrás del puerto `LlmClient`, así que cambiarlo solo toca un archivo.
+3. **Cero costo en los tests, sin perder precisión.** Ningún test llama al proveedor real.
+   - `AnthropicLlmClientTest` levanta un servidor HTTP local que imita la Messages API y comprueba el pedido exacto: modelo, instrucciones, contenido delimitado, esquema y fallback.
+   - El resto usa un LLM simulado.
+   - Antes de escribir el adaptador se verificó que el SDK use Jackson 2, como Spring Boot 3.5, para no repetir el problema que hubo con web3j.
+4. **El texto del usuario no puede romper el delimitador.** En el JSON público, `<` y `>` se escriben como `<` y `>`, un escape equivalente: el modelo lee el mismo dato, pero una descripción que contenga `</queja>` no cierra la etiqueta. Hay un test con un intento de inyección.
+5. **Un esquema, dos usos.** La salida estructurada de la API no acepta `maxLength`, `pattern` ni `maxItems`. El adaptador manda una versión sin esas restricciones y la validación local aplica el esquema completo. La salida se valida aunque la API haya respetado el esquema: es un dato no confiable.
+6. **Garantías comprobadas rompiéndolas a propósito.** Cada una de estas roturas hizo fallar al menos un test, y al restaurar el código volvió a pasar todo:
+   - quitar el filtro de la lista cerrada;
+   - quitar los reintentos;
+   - quitar el escape de los delimitadores;
+   - quitar el chequeo de triage existente, que hace saltar el `UNIQUE`;
+   - quitar el fallback ante rechazos.
+7. **Pendientes conocidos.**
+   - **Revisión jurídica de la lista cerrada:** los temas solo orientan al modelo. Se dejaron afuera los artículos cuyo contenido no se pudo confirmar.
+   - **Prueba con la API real:** el adaptador no se probó contra el proveedor real, porque cada corrida tiene costo y requiere la clave del usuario.
+   - **Sin detección de datos personales:** la HU-06 todavía no existe, así que si un ciudadano escribe datos personales en su propia descripción, esos datos ya son públicos y le llegan al LLM. El prompt pide no repetirlos en el resumen.

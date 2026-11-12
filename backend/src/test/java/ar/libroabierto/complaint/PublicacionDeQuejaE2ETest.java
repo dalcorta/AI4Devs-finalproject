@@ -5,9 +5,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import ar.libroabierto.PostgresTestcontainer;
 import ar.libroabierto.complaint.application.QuejaRepository;
 import ar.libroabierto.listener.application.CheckpointRepository;
-import ar.libroabierto.listener.application.DisparadorTriage;
 import ar.libroabierto.listener.application.FuenteDeEventos;
 import ar.libroabierto.listener.application.ProcesarEventosOnChain;
+import ar.libroabierto.triage.application.LlmClient;
+import ar.libroabierto.triage.application.RespuestaLlm;
+import ar.libroabierto.triage.application.SolicitudLlm;
 import ar.libroabierto.shared.hashing.CanonicalHasher;
 import ar.libroabierto.support.AnvilLocal;
 import java.math.BigInteger;
@@ -17,10 +19,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,13 +42,14 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * Criterios de aceptación de los tickets de publicación y del listener, con la aplicación completa: una queja
- * PENDIENTE queda publicada en IPFS y anclada por el worker, y el listener la confirma al leer el evento
- * ComplaintFiled real. Reprocesar los mismos eventos no reescribe la queja ni vuelve a disparar el triage.
+ * Criterios de aceptación de los tickets de publicación, listener y triage, con la aplicación completa: una queja
+ * PENDIENTE queda publicada en IPFS y anclada por el worker, el listener la confirma al leer el evento ComplaintFiled
+ * real y el worker de triage la clasifica con el LLM (simulado) viendo solo su contenido público. Reprocesar los
+ * mismos eventos no reescribe la queja ni genera un segundo triage.
  */
 @SpringBootTest
 @Testcontainers
-@Import({PostgresTestcontainer.class, PublicacionDeQuejaE2ETest.TriageEspia.class})
+@Import({PostgresTestcontainer.class, PublicacionDeQuejaE2ETest.LlmFalso.class})
 class PublicacionDeQuejaE2ETest {
 
     @Container
@@ -60,7 +64,7 @@ class PublicacionDeQuejaE2ETest {
     private JdbcTemplate jdbc;
 
     @Autowired
-    private TriageEspia triage;
+    private LlmFalso llm;
 
     @Autowired
     private QuejaRepository quejas;
@@ -81,6 +85,9 @@ class PublicacionDeQuejaE2ETest {
                 () -> AnvilLocal.RELAYER.getEcKeyPair().getPrivateKey().toString(16));
         props.add("libroabierto.worker.intervalo", () -> "PT0.5S");
         props.add("libroabierto.listener.intervalo", () -> "PT0.5S");
+        props.add("libroabierto.triage.intervalo", () -> "PT0.5S");
+        // El LLM real se reemplaza por LlmFalso; la clave solo cumple con la configuración obligatoria.
+        props.add("libroabierto.triage.api-key", () -> "clave-no-usada");
     }
 
     @AfterAll
@@ -91,7 +98,7 @@ class PublicacionDeQuejaE2ETest {
     }
 
     @Test
-    void unaQuejaPendienteQuedaPublicadaAncladaYConfirmadaConElMismoHash() throws Exception {
+    void unaQuejaPendienteQuedaPublicadaAncladaConfirmadaYTriada() throws Exception {
         UUID queja = quejaPendiente("30712345678", "Corte de servicio de internet durante 15 días.");
 
         Map<String, Object> fila = esperarEstado(queja, "CONFIRMADA");
@@ -110,7 +117,13 @@ class PublicacionDeQuejaE2ETest {
         assertThat(jdbc.queryForMap("SELECT estado, block_number FROM transaccion_blockchain WHERE tx_hash = ?", txHash))
                 .containsEntry("estado", "CONFIRMADA")
                 .containsEntry("block_number", recibo.getBlockNumber().longValueExact());
-        assertThat(triage.disparos(queja)).isEqualTo(1);
+        Map<String, Object> triage = esperarTriage(queja);
+        assertThat(triage).containsEntry("estado", "SUGERIDO").containsEntry("prioridad", "MEDIA")
+                .containsEntry("modelo", "llm-falso");
+        // El LLM recibió exactamente el documento público, sin datos personales del denunciante.
+        assertThat(llm.contenidosCon("Corte de servicio de internet")).singleElement().asString()
+                .contains("30712345678")
+                .doesNotContain("Persona Ficticia Única", "@example.test", "1155443322");
 
         String documento = leerDeIpfs(cid);
         assertThat(CanonicalHasher.hash(documento)).isEqualTo(contentHash);
@@ -120,7 +133,7 @@ class PublicacionDeQuejaE2ETest {
     }
 
     @Test
-    void reprocesarLosEventosDesdeCeroNoReescribeLaQuejaNiDuplicaElTriage() throws Exception {
+    void reprocesarLosEventosDesdeCeroNoReescribeLaQuejaNiGeneraOtroTriage() throws Exception {
         UUID queja = quejaPendiente("30500010912", "Cobro duplicado en la factura de octubre.");
         Map<String, Object> confirmada = esperarEstado(queja, "CONFIRMADA");
 
@@ -139,13 +152,17 @@ class PublicacionDeQuejaE2ETest {
             }
         };
         ProcesarEventosOnChain.Resultado replay = new ProcesarEventosOnChain(
-                quejas, fuente, sinCheckpoint, triage, 0, 0, 1000).ejecutar();
+                quejas, fuente, sinCheckpoint, 0, 0, 1000).ejecutar();
 
         assertThat(replay.confirmadas()).isZero();
         assertThat(replay.ignorados()).isPositive();
         assertThat(jdbc.queryForMap("SELECT anchor_status, content_hash, ipfs_cid, onchain_id FROM queja WHERE id = ?",
                 queja)).isEqualTo(confirmada);
-        assertThat(triage.disparos(queja)).isEqualTo(1);
+        esperarTriage(queja);
+        Thread.sleep(1500); // varias pasadas del worker de triage después del reproceso
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM triage WHERE queja_id = ?", Long.class, queja))
+                .isEqualTo(1);
+        assertThat(llm.contenidosCon("Cobro duplicado en la factura")).hasSize(1);
     }
 
     private UUID quejaPendiente(String cuit, String descripcion) {
@@ -165,6 +182,19 @@ class PublicacionDeQuejaE2ETest {
                 VALUES (?, ?, ?, 'telecomunicaciones', ?, 15000, DATE '2026-10-15')""",
                 queja, usuario, empresa, descripcion);
         return queja;
+    }
+
+    private Map<String, Object> esperarTriage(UUID queja) throws InterruptedException {
+        Instant limite = Instant.now().plus(Duration.ofSeconds(30));
+        while (Instant.now().isBefore(limite)) {
+            List<Map<String, Object>> filas = jdbc.queryForList(
+                    "SELECT estado, prioridad, modelo FROM triage WHERE queja_id = ?", queja);
+            if (!filas.isEmpty()) {
+                return filas.get(0);
+            }
+            Thread.sleep(200);
+        }
+        throw new AssertionError("La queja " + queja + " no fue triada a tiempo");
     }
 
     private Map<String, Object> esperarEstado(UUID queja, String estado) throws InterruptedException {
@@ -188,24 +218,27 @@ class PublicacionDeQuejaE2ETest {
         return HttpClient.newHttpClient().send(pedido, HttpResponse.BodyHandlers.ofString()).body();
     }
 
-    /** Reemplaza al disparador real para contar cuántas veces se pidió el triage de cada queja. */
+    /** Reemplaza al cliente de Anthropic: responde un triage válido y registra el contenido de cada pedido. */
     @TestConfiguration(proxyBeanMethods = false)
-    static class TriageEspia implements DisparadorTriage {
-        private final Map<UUID, Integer> disparos = new ConcurrentHashMap<>();
+    static class LlmFalso implements LlmClient {
+        private final List<String> contenidos = new CopyOnWriteArrayList<>();
 
         @Bean
         @Primary
-        DisparadorTriage triageEspia() {
+        LlmClient llmFalso() {
             return this;
         }
 
         @Override
-        public void quejaConfirmada(UUID quejaId) {
-            disparos.merge(quejaId, 1, Integer::sum);
+        public RespuestaLlm completar(SolicitudLlm solicitud) {
+            contenidos.add(solicitud.contenido());
+            return new RespuestaLlm("""
+                    {"categoria": "telecomunicaciones", "resumen": "Queja de prueba.", "prioridad": "MEDIA",
+                     "articulos": ["19"]}""", "llm-falso");
         }
 
-        int disparos(UUID quejaId) {
-            return disparos.getOrDefault(quejaId, 0);
+        List<String> contenidosCon(String texto) {
+            return contenidos.stream().filter(c -> c.contains(texto)).toList();
         }
     }
 }

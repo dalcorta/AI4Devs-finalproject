@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["categoria", "resumen", "prioridad", "articulos"],
+  "properties": {
+    "categoria": {
+      "type": "string",
+      "description": "Rubro de la queja, en minúsculas",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "\\S"
+    },
+    "resumen": {
+      "type": "string",
+      "description": "Resumen neutral de los hechos, de 3 líneas como máximo",
+      "minLength": 1,
+      "maxLength": 600,
+      "pattern": "\\S"
+    },
+    "prioridad": {
+      "type": "string",
+      "enum": ["BAJA", "MEDIA", "ALTA"]
+    },
+    "articulos": {
+      "type": "array",
+      "description": "Artículos de la Ley 24.240 tomados de la lista cerrada",
+      "items": { "type": "string" },
+      "maxItems": 10
+    }
+  }
+}

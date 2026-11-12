@@ -120,7 +120,7 @@ flowchart LR
         WRK[Worker de publicación<br/>outbox poller]
         ANC[Servicio de anclaje<br/>Web3j relayer]
         LST[Listener de eventos<br/>Web3j]
-        TRI[Servicio de triage<br/>cliente LLM]
+        TRI[Worker de triage<br/>outbox poller + cliente LLM]
         MOCK[Mock Organismo<br/>Defensa del Consumidor]
     end
 
@@ -139,15 +139,15 @@ flowchart LR
     BC -->|evento ComplaintFiled| LST
     LST -->|busca queja por content_hash| DB
     LST -->|actualiza onchain_id, CONFIRMADA| DB
-    LST --> TRI
-    TRI --> LLM
-    TRI --> DB
+    TRI -->|lee CONFIRMADA sin triage| DB
+    TRI -->|solo el JSON público| LLM
+    TRI -->|guarda triage SUGERIDO o MANUAL| DB
     TRI -.->|should-have| MOCK
     FE -->|lectura directa de hash| BC
     FE -->|lectura de contenido| IPFS
 ```
 
-**Patrón.** Monolito modular en el backend con un flujo **orientado a eventos**: la blockchain actúa como log inmutable y el listener reacciona a sus eventos. Es un patrón **outbox**: `POST /api/quejas` solo persiste la queja en PostgreSQL con `anchor_status = PENDIENTE` y responde 202; un **worker de publicación** (poller en segundo plano) es quien de verdad sube el JSON a IPFS, calcula el `content_hash` y dispara la transacción, dejando la queja en `ENVIADA`. La clave de correlación entre el evento on-chain y la fila en PostgreSQL es el **`content_hash`** (único): el worker lo calcula y persiste *antes* de enviar la transacción, así que cuando el listener recibe `ComplaintFiled` —que trae el hash pero no el UUID interno— busca la queja por ese hash para completar `onchain_id` y pasarla a `CONFIRMADA`.
+**Patrón.** Monolito modular en el backend con un flujo **orientado a eventos**: la blockchain actúa como log inmutable y el listener reacciona a sus eventos. Es un patrón **outbox**: `POST /api/quejas` solo persiste la queja en PostgreSQL con `anchor_status = PENDIENTE` y responde 202; un **worker de publicación** (poller en segundo plano) es quien de verdad sube el JSON a IPFS, calcula el `content_hash` y dispara la transacción, dejando la queja en `ENVIADA`. La clave de correlación entre el evento on-chain y la fila en PostgreSQL es el **`content_hash`** (único): el worker lo calcula y persiste *antes* de enviar la transacción, así que cuando el listener recibe `ComplaintFiled` —que trae el hash pero no el UUID interno— busca la queja por ese hash para completar `onchain_id` y pasarla a `CONFIRMADA`. El triage sigue el mismo patrón: un **worker de triage** toma las quejas `CONFIRMADA` que todavía no tienen triage, así que el listener no depende de que el LLM responda y una caída del proveedor no pierde ninguna queja.
 
 **Por qué esta arquitectura.**
 - **Blockchain como capa de anclaje, no como base de datos.** On-chain solo van hashes, CID, CUIT y estado. Es barato, rápido y evita publicar datos personales en un medio inmutable.
@@ -292,11 +292,13 @@ erDiagram
     TRIAGE {
         uuid id PK
         uuid queja_id FK,UK "NOT NULL"
-        varchar categoria_sugerida "NOT NULL"
-        text resumen "NOT NULL"
-        varchar prioridad "NOT NULL: BAJA | MEDIA | ALTA"
-        jsonb articulos_sugeridos "NOT NULL"
+        varchar estado "NOT NULL: SUGERIDO | MANUAL"
+        varchar categoria_sugerida "NULL solo si MANUAL"
+        text resumen "NULL solo si MANUAL"
+        varchar prioridad "BAJA | MEDIA | ALTA; NULL solo si MANUAL"
+        jsonb articulos_sugeridos "NULL solo si MANUAL"
         varchar modelo "NOT NULL"
+        int intentos "NOT NULL"
         timestamptz created_at "NOT NULL"
     }
     CAMBIO_ESTADO {
@@ -362,7 +364,7 @@ function complaintIdByHash(bytes32 contentHash) external view returns (uint256);
 - **EMPRESA:** entidad denunciada, identificada por su CUIT único (validado con dígito verificador).
 - **QUEJA:** núcleo del dominio. Guarda la versión de trabajo de la queja y las referencias a su publicación (`ipfs_cid`, `content_hash`, `onchain_id`). `estado` sigue la máquina de estados `REGISTRADA → EN_REVISION → DERIVADA → RESUELTA | DESESTIMADA`. `content_hash` se calcula y persiste *antes* de enviar la transacción de anclaje, y es la clave que el listener usa para encontrar esta fila al recibir el evento `ComplaintFiled` (que no trae el UUID interno).
 - **EVIDENCIA:** archivos públicos adjuntos a una queja (fotos del producto, capturas), publicados en IPFS. Las facturas con datos personales no se publican.
-- **TRIAGE:** resultado del LLM, en relación 1 a 1 con la queja. Guarda el modelo usado, para trazabilidad.
+- **TRIAGE:** resultado del LLM, en relación 1 a 1 con la queja. Guarda el modelo usado y los intentos, para trazabilidad. En estado `MANUAL` ("Triage manual") ninguna salida del LLM pasó la validación tras los reintentos, y no lleva los campos sugeridos.
 - **CAMBIO_ESTADO:** historial auditable de transiciones; cada una se ancla on-chain y guarda su `tx_hash`.
 - **TRANSACCION_BLOCKCHAIN:** registro de las transacciones enviadas por el relayer, con reintentos y confirmación.
 - **LISTENER_CHECKPOINT:** último bloque procesado por el listener, para recuperarse tras un reinicio sin perder ni duplicar eventos.
@@ -715,7 +717,7 @@ Criterios de aceptación:
 - **Tareas:**
   - Lectura periódica de eventos con `eth_getLogs` por lotes de bloques desde `listener_checkpoint.ultimo_bloque`, esperando un número configurable de confirmaciones. Se usa polling y no una suscripción por WebSocket: funciona con cualquier RPC HTTP, no pierde eventos si se corta la conexión y respeta el límite de rango de los RPC públicos.
   - Al recibir `ComplaintFiled`: buscar la queja por `content_hash` (único), actualizar `onchain_id` y `anchor_status = CONFIRMADA`.
-  - Disparar el caso de uso de triage tras confirmar.
+  - Dejar la queja `CONFIRMADA` lista para el worker de triage (patrón outbox), sin llamar al LLM desde el listener.
   - Idempotencia: si `onchain_id` ya está seteado, no reprocesar el evento.
 - **Criterios de aceptación:** test de integración con Anvil donde se emite un evento real y el listener actualiza la queja correcta por `content_hash`; al reenviar el mismo evento no se duplica el triage ni se reescribe el estado.
 
@@ -727,7 +729,8 @@ Criterios de aceptación:
   - Prompt de extracción con el texto público de la queja y una **lista cerrada** de artículos de la Ley 24.240 permitidos.
   - Validación de la salida contra JSON Schema; reintento hasta 2 veces ante salida inválida; descarte de cualquier artículo citado que no esté en la lista cerrada (mitiga alucinaciones).
   - Si tras los reintentos sigue fallando, marcar la queja como "Triage manual".
-  - Persistencia en `TRIAGE` con el modelo usado, para trazabilidad.
+  - Persistencia en `TRIAGE` con el modelo usado y los intentos, para trazabilidad; "Triage manual" es `estado = MANUAL`.
+  - Worker programado que toma las quejas `CONFIRMADA` sin triage; si el proveedor no responde, no guarda nada y la queja vuelve en la próxima pasada.
 - **Criterios de aceptación:** test unitario con una salida de LLM simulada que cite un artículo fuera de la lista cerrada y se descarte; test de idempotencia (mismo evento → un solo triage); test del camino "Triage manual" tras 2 reintentos fallidos.
 
 **Ticket 6 — [Frontend] Vista pública con verificación de integridad**

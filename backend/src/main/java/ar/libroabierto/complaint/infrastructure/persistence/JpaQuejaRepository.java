@@ -4,13 +4,16 @@ import ar.libroabierto.complaint.application.QuejaRepository;
 import ar.libroabierto.complaint.domain.AnchorStatus;
 import ar.libroabierto.complaint.domain.Empresa;
 import ar.libroabierto.complaint.domain.Queja;
+import ar.libroabierto.triage.application.QuejasParaTriage;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 @Component
-public class JpaQuejaRepository implements QuejaRepository {
+public class JpaQuejaRepository implements QuejaRepository, QuejasParaTriage {
 
     private final QuejaJpaRepository quejas;
     private final TransaccionBlockchainJpaRepository transacciones;
@@ -30,6 +33,19 @@ public class JpaQuejaRepository implements QuejaRepository {
     @Transactional(readOnly = true)
     public Optional<Queja> porContentHash(String contentHash) {
         return quejas.porContentHash(contentHash).map(JpaQuejaRepository::aDominio);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Queja> confirmadasSinTriage(int limite) {
+        List<UUID> ids = quejas.idsConfirmadasSinTriage(limite);
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return quejas.conIds(ids).stream()
+                .sorted(Comparator.comparingInt(e -> ids.indexOf(e.id())))
+                .map(JpaQuejaRepository::aDominio)
+                .toList();
     }
 
     /** Persiste el avance del anclaje. El alta de quejas nuevas corresponde al caso de uso RegistrarQueja. */

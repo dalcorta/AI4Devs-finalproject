@@ -27,7 +27,7 @@ class EsquemaTest {
     @Test
     void flywayAplicaLasMigraciones() {
         assertThat(jdbc.queryForList("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank",
-                String.class)).containsExactly("1", "2");
+                String.class)).containsExactly("1", "2", "3");
     }
 
     @Test
@@ -52,6 +52,33 @@ class EsquemaTest {
 
         assertThat(jdbc.update("UPDATE queja SET anchor_status = 'CONFIRMADA', onchain_id = 1 WHERE id = ?", queja))
                 .isEqualTo(1);
+    }
+
+    @Test
+    void unTriageSugeridoSinPrioridadEsRechazado() {
+        UUID queja = queja(HASH);
+
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO triage (id, queja_id, estado, categoria_sugerida, resumen, articulos_sugeridos, modelo)
+                VALUES (?, ?, 'SUGERIDO', 'telecomunicaciones', 'Resumen', '[]'::jsonb, 'modelo')""",
+                UUID.randomUUID(), queja)).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void unTriageManualNoNecesitaLosCamposDelLlm() {
+        UUID queja = queja(HASH);
+
+        assertThat(jdbc.update("INSERT INTO triage (id, queja_id, estado, modelo, intentos) "
+                + "VALUES (?, ?, 'MANUAL', 'modelo', 3)", UUID.randomUUID(), queja)).isEqualTo(1);
+    }
+
+    @Test
+    void unEstadoDeTriageFueraDelEnumEsRechazado() {
+        UUID queja = queja(HASH);
+
+        assertThatThrownBy(() -> jdbc.update("INSERT INTO triage (id, queja_id, estado, modelo) "
+                + "VALUES (?, ?, 'OTRO', 'modelo')", UUID.randomUUID(), queja))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test

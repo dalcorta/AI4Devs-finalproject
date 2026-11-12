@@ -30,3 +30,10 @@ libroabierto:
     bloque-inicial: ${LISTENER_BLOQUE_INICIAL:0}
     confirmaciones: ${LISTENER_CONFIRMACIONES:0}
     max-bloques-por-lote: ${LISTENER_MAX_BLOQUES_POR_LOTE:2000}
+  triage:
+    habilitado: ${TRIAGE_HABILITADO:true}
+    intervalo: ${TRIAGE_INTERVALO:PT10S}
+    modelo: ${TRIAGE_MODELO:claude-opus-5-5}
+    lote: ${TRIAGE_LOTE:10}
+    # Sin valor por defecto a propósito: con el triage habilitado, sin clave la aplicación no arranca.
+    api-key: ${ANTHROPIC_API_KEY:}

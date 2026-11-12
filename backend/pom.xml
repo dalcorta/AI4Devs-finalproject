@@ -21,6 +21,8 @@
         <!-- 5.0.2 es la última web3j sobre Jackson 2, como Spring Boot 3.5; desde 5.0.3 usa Jackson 3 -->
         <web3j.version>5.0.2</web3j.version>
         <jcs.version>1.1</jcs.version>
+        <anthropic.version>3.3.0</anthropic.version>
+        <json-schema-validator.version>1.5.9</json-schema-validator.version>
     </properties>
 
     <dependencies>
@@ -62,6 +64,16 @@
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.anthropic</groupId>
+            <artifactId>anthropic-java</artifactId>
+            <version>${anthropic.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>${json-schema-validator.version}</version>
         </dependency>
 
         <dependency>
