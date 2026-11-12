@@ -37,3 +37,7 @@ libroabierto:
     lote: ${TRIAGE_LOTE:10}
     # Sin valor por defecto a propósito: con el triage habilitado, sin clave la aplicación no arranca.
     api-key: ${ANTHROPIC_API_KEY:}
+  auth:
+    # Sin valor por defecto a propósito: sin JWT_SECRET (32 bytes o más) la aplicación no arranca.
+    jwt-secret: ${JWT_SECRET:}
+    duracion-token: ${JWT_DURACION:PT1H}

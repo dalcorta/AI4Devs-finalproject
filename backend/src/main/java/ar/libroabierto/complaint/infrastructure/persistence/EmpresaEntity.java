@@ -26,6 +26,14 @@ class EmpresaEntity {
     protected EmpresaEntity() {
     }
 
+    static EmpresaEntity nueva(String cuit, String razonSocial) {
+        EmpresaEntity empresa = new EmpresaEntity();
+        empresa.id = UUID.randomUUID();
+        empresa.cuit = cuit;
+        empresa.razonSocial = razonSocial;
+        return empresa;
+    }
+
     String cuit() {
         return cuit;
     }

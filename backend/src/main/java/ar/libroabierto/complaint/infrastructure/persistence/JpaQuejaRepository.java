@@ -1,10 +1,13 @@
 package ar.libroabierto.complaint.infrastructure.persistence;
 
+import ar.libroabierto.complaint.application.EmpresaRepository;
 import ar.libroabierto.complaint.application.QuejaRepository;
+import ar.libroabierto.complaint.application.RegistroDeQuejas;
 import ar.libroabierto.complaint.domain.AnchorStatus;
 import ar.libroabierto.complaint.domain.Empresa;
 import ar.libroabierto.complaint.domain.Queja;
 import ar.libroabierto.triage.application.QuejasParaTriage;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -13,14 +16,40 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 @Component
-public class JpaQuejaRepository implements QuejaRepository, QuejasParaTriage {
+public class JpaQuejaRepository implements QuejaRepository, QuejasParaTriage, RegistroDeQuejas, EmpresaRepository {
 
     private final QuejaJpaRepository quejas;
+    private final EmpresaJpaRepository empresas;
     private final TransaccionBlockchainJpaRepository transacciones;
 
-    JpaQuejaRepository(QuejaJpaRepository quejas, TransaccionBlockchainJpaRepository transacciones) {
+    JpaQuejaRepository(QuejaJpaRepository quejas, EmpresaJpaRepository empresas,
+            TransaccionBlockchainJpaRepository transacciones) {
         this.quejas = quejas;
+        this.empresas = empresas;
         this.transacciones = transacciones;
+    }
+
+    @Override
+    @Transactional
+    public void registrar(Queja queja) {
+        Empresa empresa = queja.empresa();
+        EmpresaEntity entidadEmpresa = empresas.findByCuit(empresa.cuit())
+                .orElseGet(() -> empresas.save(EmpresaEntity.nueva(empresa.cuit(), empresa.razonSocial())));
+        quejas.save(QuejaEntity.nueva(queja.id(), queja.usuarioId(), entidadEmpresa, queja.categoria(),
+                queja.descripcion(), queja.montoReclamado(), queja.fechaHecho(), queja.anchorStatus(),
+                queja.registradaEn()));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long registradasDesde(UUID usuarioId, Instant desde) {
+        return quejas.countByUsuarioIdAndCreatedAtGreaterThanEqual(usuarioId, desde);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Empresa> porCuit(String cuit) {
+        return empresas.findByCuit(cuit).map(e -> new Empresa(e.cuit(), e.razonSocial()));
     }
 
     @Override

@@ -5,10 +5,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import ar.libroabierto.PostgresTestcontainer;
 import ar.libroabierto.complaint.domain.AnchorStatus;
 import ar.libroabierto.complaint.domain.DocumentoPublico;
+import ar.libroabierto.complaint.domain.Empresa;
 import ar.libroabierto.complaint.domain.Queja;
 import ar.libroabierto.shared.hashing.CanonicalHasher;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -203,6 +205,56 @@ class JpaQuejaRepositoryTest {
         assertThat(pendientes).extracting(Queja::id).containsExactly(sinTriage, otraSinTriage);
         assertThat(pendientes.get(0).empresa().cuit()).isEqualTo("30712345678");
         assertThat(repositorio.confirmadasSinTriage(1)).extracting(Queja::id).containsExactly(sinTriage);
+    }
+
+    @Test
+    void registrarInsertaLaQuejaPendienteYCreaLaEmpresaSiNoExiste() {
+        Queja nueva = Queja.nueva(UUID.randomUUID(), usuario, new Empresa("30712345671", "Empresa Nueva S.A."),
+                "bancos", "Cobro indebido.", new BigDecimal("100.50"), LocalDate.parse("2026-11-01"), List.of(),
+                Instant.parse("2026-11-12T15:00:00Z"));
+
+        repositorio.registrar(nueva);
+        sincronizar();
+
+        Map<String, Object> fila = jdbc.queryForMap("""
+                SELECT q.anchor_status, q.created_at, e.cuit, e.razon_social
+                FROM queja q JOIN empresa e ON e.id = q.empresa_id WHERE q.id = ?""", nueva.id());
+        assertThat(fila).containsEntry("anchor_status", "PENDIENTE")
+                .containsEntry("cuit", "30712345671")
+                .containsEntry("razon_social", "Empresa Nueva S.A.");
+        assertThat(((java.sql.Timestamp) fila.get("created_at")).toInstant())
+                .isEqualTo(Instant.parse("2026-11-12T15:00:00Z"));
+        assertThat(repositorio.pendientesDeAnclaje()).extracting(Queja::id).containsExactly(nueva.id());
+    }
+
+    @Test
+    void registrarConUnCuitExistenteReusaLaEmpresa() {
+        Queja nueva = Queja.nueva(UUID.randomUUID(), usuario, new Empresa("30712345678", "Empresa Ficticia S.A."),
+                "bancos", "Cobro indebido.", null, LocalDate.parse("2026-11-01"), List.of(),
+                Instant.parse("2026-11-12T15:00:00Z"));
+
+        repositorio.registrar(nueva);
+        sincronizar();
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM empresa", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT empresa_id FROM queja WHERE id = ?", UUID.class, nueva.id()))
+                .isEqualTo(empresa);
+    }
+
+    @Test
+    void porCuitDevuelveLaEmpresaRegistrada() {
+        assertThat(repositorio.porCuit("30712345678")).contains(new Empresa("30712345678", "Empresa Ficticia S.A."));
+        assertThat(repositorio.porCuit("30712345671")).isEmpty();
+    }
+
+    @Test
+    void registradasDesdeCuentaSoloLasDelUsuarioDesdeEseInstante() {
+        queja("PENDIENTE", null, "2026-11-12T02:59:59Z");
+        queja("PENDIENTE", null, "2026-11-12T03:00:00Z");
+        queja("ENVIADA", null, "2026-11-12T20:00:00Z");
+
+        assertThat(repositorio.registradasDesde(usuario, Instant.parse("2026-11-12T03:00:00Z"))).isEqualTo(2);
+        assertThat(repositorio.registradasDesde(UUID.randomUUID(), Instant.parse("2026-11-12T03:00:00Z"))).isZero();
     }
 
     private UUID confirmada(String creadaEn, long onchainId) {

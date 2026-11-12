@@ -361,3 +361,49 @@ Resultado:
    - **Revisión jurídica de la lista cerrada:** los temas solo orientan al modelo. Se dejaron afuera los artículos cuyo contenido no se pudo confirmar.
    - **Prueba con la API real:** el adaptador no se probó contra el proveedor real, porque cada corrida tiene costo y requiere la clave del usuario.
    - **Sin detección de datos personales:** la HU-06 todavía no existe, así que si un ciudadano escribe datos personales en su propia descripción, esos datos ya son públicos y le llegan al LLM. El prompt pide no repetirlos en el resumen.
+
+---
+
+## Implementación — Registro de quejas por API y login con JWT (Claude Code)
+
+**Prompt**
+```
+Sí, seguir
+```
+
+Resultado:
+- `POST /api/quejas` (HU-01) responde `202` con `id`, `anchorStatus: PENDIENTE` y `Location`.
+- El caso de uso `RegistrarQueja` hace estas validaciones:
+  - el denunciante es un ciudadano con identidad verificada;
+  - el CUIT tiene dígito verificador módulo 11 correcto;
+  - categoría, descripción y razón social dentro de los largos de la base;
+  - el monto no es negativo, tiene hasta 2 decimales y entra en `numeric(14,2)`;
+  - la fecha del hecho no es futura.
+
+  Después aplica el límite de 5 quejas por día. Informa todos los campos inválidos juntos (400). La empresa se crea si no existe y, si existe, su razón social no la cambia el denunciante.
+- El "día" del límite y de la fecha del hecho es el de Buenos Aires, no el del servidor. Hay tests para las 23:30 hora argentina, que en UTC ya es el día siguiente.
+- Módulo `identity`:
+  - `POST /api/auth/login` con BCrypt.
+  - JWT HS256 que lleva solo el id interno y el rol.
+  - Mismo error para un email desconocido que para una clave incorrecta, y en ambos casos se verifica un hash, para no delatar por tiempo de respuesta qué emails existen.
+  - `JWT_SECRET` sin valor por defecto y con un mínimo de 32 bytes.
+- `SeguridadConfig` niega por defecto, no usa sesiones y no tiene CSRF, porque la credencial va en un header y no en una cookie. El denunciante sale del token firmado, nunca del cuerpo del pedido.
+- El test de aceptación de punta a punta ahora empieza como en producción: login y `POST /api/quejas`, luego publicación, anclaje, confirmación y triage.
+- 153 tests del backend, 0 fallidos, 0 omitidos.
+
+**Verificación y ajustes humanos**
+1. **El alcance incluyó el login porque la especificación lo exige.** El endpoint está protegido con JWT y rol `CIUDADANO`, y sin autenticación no hay forma correcta de saber quién denuncia. Se implementó el mínimo: login, emisión del token y validación del token.
+2. **Vectores de CUIT verificados por separado.** Los dígitos verificadores de los tests se calcularon con un script independiente del código. Uno de los vectores propuestos para "el resto da 10" estaba mal y se corrigió antes de usarlo.
+3. **Un test que pasaba por la razón equivocada se habría notado.** El test de la API corría dentro de una transacción de test y la fila insertada por JPA todavía no se había volcado a la base cuando se la consultaba por JDBC. Se quitó la transacción del test: cada pedido confirma su transacción como en producción y las tablas se limpian a mano.
+4. **Garantías comprobadas rompiéndolas a propósito.** Cada una de estas roturas hizo fallar al menos un test, y al restaurar el código volvió a pasar todo:
+   - aceptar cualquier dígito verificador;
+   - quitar el control de identidad verificada;
+   - correr el límite diario en uno;
+   - quitar el hash de relleno del login;
+   - abrir el endpoint sin token.
+5. **Una diferencia con el readme, señalada sin cambiarlo.** La especificación de `POST /api/quejas` no lista `403`, pero la HU-01 exige un ciudadano verificado. El endpoint responde `403` a un usuario que no es ciudadano o que no tiene la identidad verificada.
+6. **Pendientes conocidos.**
+   - El límite diario cuenta antes de insertar, así que dos pedidos simultáneos podrían pasarlo por uno.
+   - No hay límite de intentos de login.
+   - No hay seed de usuarios: hoy se crean con SQL.
+   - Los endpoints públicos de lectura (HU-02) siguen pendientes.

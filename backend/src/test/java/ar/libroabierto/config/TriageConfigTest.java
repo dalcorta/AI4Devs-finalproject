@@ -35,6 +35,7 @@ class TriageConfigTest {
                     "libroabierto.listener.bloque-inicial=0",
                     "libroabierto.listener.confirmaciones=0",
                     "libroabierto.listener.max-bloques-por-lote=2000",
+                    "libroabierto.auth.jwt-secret=secreto-de-prueba-de-al-menos-32-bytes-para-hs256",
                     "libroabierto.triage.intervalo=PT10S",
                     "libroabierto.triage.modelo=claude-opus-5-5",
                     "libroabierto.triage.lote=10");

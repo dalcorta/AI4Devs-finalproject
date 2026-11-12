@@ -58,7 +58,8 @@ class QuejaEntity {
     @Column(name = "anchor_status", nullable = false)
     private AnchorStatus anchorStatus;
 
-    @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
+    // Se inserta con el instante de registro del dominio: es el registrada_en del documento público.
+    @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
     @OneToMany(mappedBy = "queja")
@@ -66,6 +67,21 @@ class QuejaEntity {
     private List<EvidenciaEntity> evidencias = new ArrayList<>();
 
     protected QuejaEntity() {
+    }
+
+    static QuejaEntity nueva(UUID id, UUID usuarioId, EmpresaEntity empresa, String categoria, String descripcion,
+            BigDecimal monto, LocalDate fechaHecho, AnchorStatus anchorStatus, Instant registradaEn) {
+        QuejaEntity queja = new QuejaEntity();
+        queja.id = id;
+        queja.usuarioId = usuarioId;
+        queja.empresa = empresa;
+        queja.categoriaDeclarada = categoria;
+        queja.descripcion = descripcion;
+        queja.montoReclamado = monto;
+        queja.fechaHecho = fechaHecho;
+        queja.anchorStatus = anchorStatus;
+        queja.createdAt = registradaEn;
+        return queja;
     }
 
     void actualizarAnclaje(String ipfsCid, String contentHash, AnchorStatus anchorStatus, Long onchainId) {

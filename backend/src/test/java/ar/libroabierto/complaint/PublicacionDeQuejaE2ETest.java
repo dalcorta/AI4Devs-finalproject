@@ -1,6 +1,8 @@
 package ar.libroabierto.complaint;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ar.libroabierto.PostgresTestcontainer;
 import ar.libroabierto.complaint.application.QuejaRepository;
@@ -12,6 +14,7 @@ import ar.libroabierto.triage.application.RespuestaLlm;
 import ar.libroabierto.triage.application.SolicitudLlm;
 import ar.libroabierto.shared.hashing.CanonicalHasher;
 import ar.libroabierto.support.AnvilLocal;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigInteger;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -27,12 +30,16 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -48,6 +55,7 @@ import org.testcontainers.utility.DockerImageName;
  * mismos eventos no reescribe la queja ni genera un segundo triage.
  */
 @SpringBootTest
+@AutoConfigureMockMvc
 @Testcontainers
 @Import({PostgresTestcontainer.class, PublicacionDeQuejaE2ETest.LlmFalso.class})
 class PublicacionDeQuejaE2ETest {
@@ -62,6 +70,9 @@ class PublicacionDeQuejaE2ETest {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private MockMvc mvc;
 
     @Autowired
     private LlmFalso llm;
@@ -88,6 +99,7 @@ class PublicacionDeQuejaE2ETest {
         props.add("libroabierto.triage.intervalo", () -> "PT0.5S");
         // El LLM real se reemplaza por LlmFalso; la clave solo cumple con la configuración obligatoria.
         props.add("libroabierto.triage.api-key", () -> "clave-no-usada");
+        props.add("libroabierto.auth.jwt-secret", () -> "secreto-de-prueba-de-al-menos-32-bytes-para-hs256");
     }
 
     @AfterAll
@@ -99,7 +111,7 @@ class PublicacionDeQuejaE2ETest {
 
     @Test
     void unaQuejaPendienteQuedaPublicadaAncladaConfirmadaYTriada() throws Exception {
-        UUID queja = quejaPendiente("30712345678", "Corte de servicio de internet durante 15 días.");
+        UUID queja = quejaPorApi("30712345671", "Corte de servicio de internet durante 15 días.");
 
         Map<String, Object> fila = esperarEstado(queja, "CONFIRMADA");
 
@@ -122,19 +134,19 @@ class PublicacionDeQuejaE2ETest {
                 .containsEntry("modelo", "llm-falso");
         // El LLM recibió exactamente el documento público, sin datos personales del denunciante.
         assertThat(llm.contenidosCon("Corte de servicio de internet")).singleElement().asString()
-                .contains("30712345678")
+                .contains("30712345671")
                 .doesNotContain("Persona Ficticia Única", "@example.test", "1155443322");
 
         String documento = leerDeIpfs(cid);
         assertThat(CanonicalHasher.hash(documento)).isEqualTo(contentHash);
         assertThat(documento)
-                .contains("30712345678")
+                .contains("30712345671")
                 .doesNotContain("Persona Ficticia Única", "@example.test", "1155443322");
     }
 
     @Test
     void reprocesarLosEventosDesdeCeroNoReescribeLaQuejaNiGeneraOtroTriage() throws Exception {
-        UUID queja = quejaPendiente("30500010912", "Cobro duplicado en la factura de octubre.");
+        UUID queja = quejaPorApi("30500010912", "Cobro duplicado en la factura de octubre.");
         Map<String, Object> confirmada = esperarEstado(queja, "CONFIRMADA");
 
         // Un listener sin checkpoint (como tras perderlo en un reinicio) vuelve a leer todos los eventos reales.
@@ -165,23 +177,28 @@ class PublicacionDeQuejaE2ETest {
         assertThat(llm.contenidosCon("Cobro duplicado en la factura")).hasSize(1);
     }
 
-    private UUID quejaPendiente(String cuit, String descripcion) {
-        UUID usuario = UUID.randomUUID();
+    /** El recorrido empieza como en producción: un ciudadano verificado inicia sesión y registra la queja por la API. */
+    private UUID quejaPorApi(String cuit, String descripcion) throws Exception {
+        String email = "denunciante-" + UUID.randomUUID() + "@example.test";
         jdbc.update("""
-                INSERT INTO usuario (id, email, password_hash, rol, nombre_completo, dni_cifrado, telefono_cifrado)
-                VALUES (?, ?, 'x', 'CIUDADANO', 'Persona Ficticia Única',
-                        '\\x01'::bytea, convert_to('1155443322', 'UTF8'))""",
-                usuario, "denunciante-" + usuario + "@example.test");
-        UUID empresa = UUID.randomUUID();
-        jdbc.update("INSERT INTO empresa (id, cuit, razon_social) VALUES (?, ?, 'Empresa Ficticia S.A.')",
-                empresa, cuit);
-        UUID queja = UUID.randomUUID();
-        jdbc.update("""
-                INSERT INTO queja (id, usuario_id, empresa_id, categoria_declarada, descripcion, monto_reclamado,
-                                   fecha_hecho)
-                VALUES (?, ?, ?, 'telecomunicaciones', ?, 15000, DATE '2026-10-15')""",
-                queja, usuario, empresa, descripcion);
-        return queja;
+                INSERT INTO usuario (id, email, password_hash, rol, nombre_completo, dni_cifrado, telefono_cifrado,
+                                     identidad_verificada)
+                VALUES (?, ?, ?, 'CIUDADANO', 'Persona Ficticia Única', '\\x01'::bytea,
+                        convert_to('1155443322', 'UTF8'), true)""",
+                UUID.randomUUID(), email, new BCryptPasswordEncoder().encode("clave-e2e"));
+
+        String login = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\": \"" + email + "\", \"password\": \"clave-e2e\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String token = new ObjectMapper().readTree(login).get("token").asText();
+
+        String alta = mvc.perform(post("/api/quejas").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                                {"cuitEmpresa": "%s", "razonSocial": "Empresa Ficticia S.A.",
+                                 "categoria": "telecomunicaciones", "descripcion": "%s", "montoReclamado": 15000,
+                                 "fechaHecho": "2026-10-15"}""".formatted(cuit, descripcion)))
+                .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
+        return UUID.fromString(new ObjectMapper().readTree(alta).get("id").asText());
     }
 
     private Map<String, Object> esperarTriage(UUID queja) throws InterruptedException {

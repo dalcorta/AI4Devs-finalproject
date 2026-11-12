@@ -1,6 +1,7 @@
 package ar.libroabierto.complaint.infrastructure.persistence;
 
 import ar.libroabierto.complaint.domain.AnchorStatus;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -39,4 +40,6 @@ interface QuejaJpaRepository extends JpaRepository<QuejaEntity, UUID> {
             left join fetch q.evidencias
             where q.id in :ids""")
     List<QuejaEntity> conIds(Collection<UUID> ids);
+
+    long countByUsuarioIdAndCreatedAtGreaterThanEqual(UUID usuarioId, Instant desde);
 }
