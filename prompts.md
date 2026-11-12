@@ -7,10 +7,12 @@
 |---|---|
 | Gemini (chat) | Ideación del producto y exploración de alternativas de arquitectura |
 | Claude Opus (chat) | Revisión crítica del concepto, recorte del alcance del MVP y redacción de la documentación técnica (Entrega 1) |
-| _[completar]_ | Implementación (p. ej. Claude Code / Cursor con Sonnet) — Entrega 2 |
+| Claude Code (Sonnet 5 / Opus 5.5) | Aplicación del feedback de LIDR, implementación y tests del smart contract (Entrega 2) |
 
 ### Skills, subagentes, rules y comandos personalizados
-_[Completar en la Entrega 2: reglas del repo (CLAUDE.md / .cursorrules), comandos, subagentes de testing o revisión.]_
+- **[`CLAUDE.md`](CLAUDE.md)** en la raíz del repo: es el contexto fijo que Claude Code lee en cada sesión. Contiene las reglas no negociables de privacidad (nada personal sale de PostgreSQL; el LLM de triage solo ve texto público; la detección de PII corre siempre en local), el hash canónico compartido (RFC 8785 + `keccak256`), la validación de la salida del LLM contra una lista cerrada de artículos, la forma de trabajar (un ticket por vez, tests primero, no dar por terminado nada sin correr los tests) y los comandos de cada carpeta.
+- **`readme.md` como fuente de verdad:** los tickets de la sección 6 se pasan a la IA tal cual; sus criterios de aceptación son la especificación de los tests.
+- **Memoria persistente de Claude Code:** guarda las fechas de entrega y el criterio de evaluación de LIDR para priorizar entre sesiones.
 
 ### Ajustes humanos sobre el output de la IA
 Durante la ideación, la propuesta inicial generada con Gemini se revisó y corrigió en estos puntos:
@@ -113,3 +115,24 @@ Cambios aplicados sobre el diseño existente, sin tocar el alcance del MVP:
 3. **Tickets reequilibrados.** El ticket de backend que mezclaba hash canónico, IPFS, blockchain gateway y listener se dividió en "Publicación y anclaje asíncrono" y "Listener de eventos on-chain", y se agregaron tickets propios para el **smart contract** y el **servicio de triage**, que no estaban cubiertos.
 4. **Coherencia privacidad/LLM.** HU-06 (detección de datos personales antes de publicar) ahora aclara que corre siempre con un modelo local (Ollama), nunca contra el proveedor por API usado para el triage post-publicación, porque en ese punto el texto todavía no es público.
 5. **Detalle menor corregido.** Se agregó la columna `telefono_cifrado` al modelo de datos, que la sección de seguridad ya mencionaba pero el ER no tenía.
+
+---
+
+## Implementación — Smart contract `ComplaintRegistry` (Claude Code)
+
+**Prompt**
+```
+empezá con la implementación del contrato ComplaintRegistry
+```
+Contexto que usó la IA: el ticket "[Smart Contract] ComplaintRegistry" y el estado on-chain de la sección 3 del readme (enum `Status`, struct `Complaint`, eventos y roles).
+
+Resultado:
+- `contracts/src/ComplaintRegistry.sol`: `fileComplaint` (solo `RELAYER_ROLE`), `changeStatus` (solo `OFFICER_ROLE`) con la máquina de estados validada on-chain, errores específicos (`InvalidTransition`, `ComplaintNotFound`) y el comentario del funcionario anclado solo como hash.
+- `contracts/test/ComplaintRegistry.t.sol`: 8 tests de Foundry derivados de los criterios de aceptación del ticket (camino feliz, rechazo por rol, transición inválida, estado terminal, queja inexistente).
+- `contracts/script/Deploy.s.sol`: despliegue con asignación opcional de roles por variables de entorno.
+
+**Verificación y ajustes humanos**
+1. **Instalación de herramientas bajo control.** El instalador de Foundry descarga y ejecuta código externo, y el modo automático de Claude Code lo bloqueó. Mientras tanto la IA validó la compilación con `solc` vía npm (luego lo quitó del proyecto, porque Foundry trae su propio compilador) y pidió permiso; la instalación se hizo recién con autorización explícita.
+2. **Correr los tests destapó un bug en los propios tests.** 2 de 8 fallaron: `vm.prank(stranger)` quedaba consumido por la llamada a `registry.RELAYER_ROLE()` dentro de `expectRevert`, así que la llamada protegida la hacía el contrato de test. El contrato estaba bien; el test no. Se corrigió leyendo el rol antes del `prank` y los 8 tests pasan. Esto confirmó la regla de `CLAUDE.md`: nada se da por terminado sin ejecutar la suite.
+3. **Warning revisado, no ignorado.** `forge lint` marcó el cast `uint64(block.timestamp)`; se analizó que es seguro y se silenció con un comentario que lo justifica.
+4. **Lección para los próximos tickets:** en este ticket los tests y el contrato se escribieron juntos. A partir de aquí, `CLAUDE.md` exige escribir primero los tests a partir de los criterios de aceptación y verlos fallar antes de implementar.
