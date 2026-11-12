@@ -23,3 +23,10 @@ libroabierto:
   worker:
     habilitado: ${WORKER_HABILITADO:true}
     intervalo: ${WORKER_INTERVALO:PT10S}
+  listener:
+    habilitado: ${LISTENER_HABILITADO:true}
+    intervalo: ${LISTENER_INTERVALO:PT5S}
+    # Bloque del despliegue del contrato: evita recorrer la cadena desde el génesis la primera vez.
+    bloque-inicial: ${LISTENER_BLOQUE_INICIAL:0}
+    confirmaciones: ${LISTENER_CONFIRMACIONES:0}
+    max-bloques-por-lote: ${LISTENER_MAX_BLOQUES_POR_LOTE:2000}

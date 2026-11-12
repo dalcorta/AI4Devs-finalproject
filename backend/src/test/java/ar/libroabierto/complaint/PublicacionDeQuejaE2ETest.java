@@ -3,6 +3,11 @@ package ar.libroabierto.complaint;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import ar.libroabierto.PostgresTestcontainer;
+import ar.libroabierto.complaint.application.QuejaRepository;
+import ar.libroabierto.listener.application.CheckpointRepository;
+import ar.libroabierto.listener.application.DisparadorTriage;
+import ar.libroabierto.listener.application.FuenteDeEventos;
+import ar.libroabierto.listener.application.ProcesarEventosOnChain;
 import ar.libroabierto.shared.hashing.CanonicalHasher;
 import ar.libroabierto.support.AnvilLocal;
 import java.math.BigInteger;
@@ -13,11 +18,16 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -29,12 +39,13 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * Criterio de aceptación del ticket de publicación y anclaje, con la aplicación completa: una queja PENDIENTE
- * termina ENVIADA por el worker programado, publicada en IPFS y anclada en el contrato con el mismo hash.
+ * Criterios de aceptación de los tickets de publicación y del listener, con la aplicación completa: una queja
+ * PENDIENTE queda publicada en IPFS y anclada por el worker, y el listener la confirma al leer el evento
+ * ComplaintFiled real. Reprocesar los mismos eventos no reescribe la queja ni vuelve a disparar el triage.
  */
 @SpringBootTest
 @Testcontainers
-@Import(PostgresTestcontainer.class)
+@Import({PostgresTestcontainer.class, PublicacionDeQuejaE2ETest.TriageEspia.class})
 class PublicacionDeQuejaE2ETest {
 
     @Container
@@ -48,6 +59,15 @@ class PublicacionDeQuejaE2ETest {
     @Autowired
     private JdbcTemplate jdbc;
 
+    @Autowired
+    private TriageEspia triage;
+
+    @Autowired
+    private QuejaRepository quejas;
+
+    @Autowired
+    private FuenteDeEventos fuente;
+
     @DynamicPropertySource
     static void infraestructura(DynamicPropertyRegistry props) throws Exception {
         anvil = AnvilLocal.iniciar();
@@ -60,6 +80,7 @@ class PublicacionDeQuejaE2ETest {
         props.add("libroabierto.blockchain.relayer-private-key",
                 () -> AnvilLocal.RELAYER.getEcKeyPair().getPrivateKey().toString(16));
         props.add("libroabierto.worker.intervalo", () -> "PT0.5S");
+        props.add("libroabierto.listener.intervalo", () -> "PT0.5S");
     }
 
     @AfterAll
@@ -70,10 +91,10 @@ class PublicacionDeQuejaE2ETest {
     }
 
     @Test
-    void unaQuejaPendienteQuedaPublicadaYAncladaConElMismoHash() throws Exception {
-        UUID queja = quejaPendiente();
+    void unaQuejaPendienteQuedaPublicadaAncladaYConfirmadaConElMismoHash() throws Exception {
+        UUID queja = quejaPendiente("30712345678", "Corte de servicio de internet durante 15 días.");
 
-        Map<String, Object> fila = esperarEstado(queja, "ENVIADA");
+        Map<String, Object> fila = esperarEstado(queja, "CONFIRMADA");
 
         String contentHash = (String) fila.get("content_hash");
         String cid = (String) fila.get("ipfs_cid");
@@ -81,31 +102,68 @@ class PublicacionDeQuejaE2ETest {
                 "SELECT tx_hash FROM transaccion_blockchain WHERE tipo = 'REGISTRO' AND referencia_id = ?",
                 String.class, queja);
 
-        assertThat(anvil.esperarRecibo(txHash).isStatusOK()).isTrue();
-        assertThat(anvil.idPorHash(contrato, contentHash)).isEqualTo(BigInteger.ONE);
+        var recibo = anvil.esperarRecibo(txHash);
+        assertThat(recibo.isStatusOK()).isTrue();
+        BigInteger idOnChain = anvil.idPorHash(contrato, contentHash);
+        assertThat(idOnChain).isPositive();
+        assertThat(((Number) fila.get("onchain_id")).longValue()).isEqualTo(idOnChain.longValueExact());
+        assertThat(jdbc.queryForMap("SELECT estado, block_number FROM transaccion_blockchain WHERE tx_hash = ?", txHash))
+                .containsEntry("estado", "CONFIRMADA")
+                .containsEntry("block_number", recibo.getBlockNumber().longValueExact());
+        assertThat(triage.disparos(queja)).isEqualTo(1);
 
         String documento = leerDeIpfs(cid);
         assertThat(CanonicalHasher.hash(documento)).isEqualTo(contentHash);
         assertThat(documento)
                 .contains("30712345678")
-                .doesNotContain("Persona Ficticia Única", "denunciante-e2e@example.test", "1155443322");
+                .doesNotContain("Persona Ficticia Única", "@example.test", "1155443322");
     }
 
-    private UUID quejaPendiente() {
+    @Test
+    void reprocesarLosEventosDesdeCeroNoReescribeLaQuejaNiDuplicaElTriage() throws Exception {
+        UUID queja = quejaPendiente("30500010912", "Cobro duplicado en la factura de octubre.");
+        Map<String, Object> confirmada = esperarEstado(queja, "CONFIRMADA");
+
+        // Un listener sin checkpoint (como tras perderlo en un reinicio) vuelve a leer todos los eventos reales.
+        var sinCheckpoint = new CheckpointRepository() {
+            private OptionalLong valor = OptionalLong.empty();
+
+            @Override
+            public OptionalLong ultimoBloque() {
+                return valor;
+            }
+
+            @Override
+            public void guardar(long bloque) {
+                valor = OptionalLong.of(bloque);
+            }
+        };
+        ProcesarEventosOnChain.Resultado replay = new ProcesarEventosOnChain(
+                quejas, fuente, sinCheckpoint, triage, 0, 0, 1000).ejecutar();
+
+        assertThat(replay.confirmadas()).isZero();
+        assertThat(replay.ignorados()).isPositive();
+        assertThat(jdbc.queryForMap("SELECT anchor_status, content_hash, ipfs_cid, onchain_id FROM queja WHERE id = ?",
+                queja)).isEqualTo(confirmada);
+        assertThat(triage.disparos(queja)).isEqualTo(1);
+    }
+
+    private UUID quejaPendiente(String cuit, String descripcion) {
         UUID usuario = UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO usuario (id, email, password_hash, rol, nombre_completo, dni_cifrado, telefono_cifrado)
-                VALUES (?, 'denunciante-e2e@example.test', 'x', 'CIUDADANO', 'Persona Ficticia Única',
-                        '\\x01'::bytea, convert_to('1155443322', 'UTF8'))""", usuario);
+                VALUES (?, ?, 'x', 'CIUDADANO', 'Persona Ficticia Única',
+                        '\\x01'::bytea, convert_to('1155443322', 'UTF8'))""",
+                usuario, "denunciante-" + usuario + "@example.test");
         UUID empresa = UUID.randomUUID();
-        jdbc.update("INSERT INTO empresa (id, cuit, razon_social) VALUES (?, '30712345678', 'Empresa Ficticia S.A.')",
-                empresa);
+        jdbc.update("INSERT INTO empresa (id, cuit, razon_social) VALUES (?, ?, 'Empresa Ficticia S.A.')",
+                empresa, cuit);
         UUID queja = UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO queja (id, usuario_id, empresa_id, categoria_declarada, descripcion, monto_reclamado,
                                    fecha_hecho)
-                VALUES (?, ?, ?, 'telecomunicaciones', 'Corte de servicio de internet durante 15 días.', 15000,
-                        DATE '2026-10-15')""", queja, usuario, empresa);
+                VALUES (?, ?, ?, 'telecomunicaciones', ?, 15000, DATE '2026-10-15')""",
+                queja, usuario, empresa, descripcion);
         return queja;
     }
 
@@ -113,7 +171,7 @@ class PublicacionDeQuejaE2ETest {
         Instant limite = Instant.now().plus(Duration.ofSeconds(30));
         while (Instant.now().isBefore(limite)) {
             Map<String, Object> fila = jdbc.queryForMap(
-                    "SELECT anchor_status, content_hash, ipfs_cid FROM queja WHERE id = ?", queja);
+                    "SELECT anchor_status, content_hash, ipfs_cid, onchain_id FROM queja WHERE id = ?", queja);
             if (estado.equals(fila.get("anchor_status"))) {
                 return fila;
             }
@@ -128,5 +186,26 @@ class PublicacionDeQuejaE2ETest {
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
         return HttpClient.newHttpClient().send(pedido, HttpResponse.BodyHandlers.ofString()).body();
+    }
+
+    /** Reemplaza al disparador real para contar cuántas veces se pidió el triage de cada queja. */
+    @TestConfiguration(proxyBeanMethods = false)
+    static class TriageEspia implements DisparadorTriage {
+        private final Map<UUID, Integer> disparos = new ConcurrentHashMap<>();
+
+        @Bean
+        @Primary
+        DisparadorTriage triageEspia() {
+            return this;
+        }
+
+        @Override
+        public void quejaConfirmada(UUID quejaId) {
+            disparos.merge(quejaId, 1, Integer::sum);
+        }
+
+        int disparos(UUID quejaId) {
+            return disparos.getOrDefault(quejaId, 0);
+        }
     }
 }

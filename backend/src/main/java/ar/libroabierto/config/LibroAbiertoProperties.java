@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
@@ -11,7 +12,7 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 @ConfigurationProperties("libroabierto")
 public record LibroAbiertoProperties(@Valid @NotNull Ipfs ipfs, @Valid @NotNull Blockchain blockchain,
-        @Valid @NotNull Worker worker) {
+        @Valid @NotNull Worker worker, @Valid @NotNull Listener listener) {
 
     public record Ipfs(@NotBlank String apiUrl) {
     }
@@ -27,5 +28,14 @@ public record LibroAbiertoProperties(@Valid @NotNull Ipfs ipfs, @Valid @NotNull 
     }
 
     public record Worker(boolean habilitado, @NotNull Duration intervalo) {
+    }
+
+    /**
+     * @param bloqueInicial bloque desde el que se lee si no hay checkpoint: el del despliegue del contrato
+     * @param confirmaciones bloques que se esperan encima de un evento antes de procesarlo (0 en Anvil)
+     * @param maxBloquesPorLote tope de cada consulta eth_getLogs; los RPC públicos limitan el rango
+     */
+    public record Listener(boolean habilitado, @NotNull Duration intervalo, @PositiveOrZero long bloqueInicial,
+            @PositiveOrZero int confirmaciones, @Positive int maxBloquesPorLote) {
     }
 }

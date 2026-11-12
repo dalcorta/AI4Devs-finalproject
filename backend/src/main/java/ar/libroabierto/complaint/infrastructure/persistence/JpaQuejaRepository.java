@@ -5,6 +5,7 @@ import ar.libroabierto.complaint.domain.AnchorStatus;
 import ar.libroabierto.complaint.domain.Empresa;
 import ar.libroabierto.complaint.domain.Queja;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,16 +26,29 @@ public class JpaQuejaRepository implements QuejaRepository {
         return quejas.conAnclaje(AnchorStatus.PENDIENTE).stream().map(JpaQuejaRepository::aDominio).toList();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Queja> porContentHash(String contentHash) {
+        return quejas.porContentHash(contentHash).map(JpaQuejaRepository::aDominio);
+    }
+
     /** Persiste el avance del anclaje. El alta de quejas nuevas corresponde al caso de uso RegistrarQueja. */
     @Override
     @Transactional
     public void guardar(Queja queja) {
         QuejaEntity entidad = quejas.findById(queja.id())
                 .orElseThrow(() -> new IllegalStateException("La queja " + queja.id() + " no existe"));
-        entidad.actualizarAnclaje(queja.ipfsCid(), queja.contentHash(), queja.anchorStatus());
+        entidad.actualizarAnclaje(queja.ipfsCid(), queja.contentHash(), queja.anchorStatus(), queja.onchainId());
 
-        if (queja.txHash() != null && !transacciones.existsByTxHash(queja.txHash())) {
-            transacciones.save(TransaccionBlockchainEntity.registroEnviado(queja.txHash(), queja.id()));
+        if (queja.txHash() == null) {
+            return;
+        }
+        // Si el worker se cayó antes de registrar la transacción, la confirmación del listener la crea.
+        TransaccionBlockchainEntity tx = transacciones.findByTxHash(queja.txHash())
+                .orElseGet(() -> transacciones.save(
+                        TransaccionBlockchainEntity.registroEnviado(queja.txHash(), queja.id())));
+        if (queja.bloqueConfirmacion() != null) {
+            tx.confirmar(queja.bloqueConfirmacion());
         }
     }
 
@@ -52,6 +66,7 @@ public class JpaQuejaRepository implements QuejaRepository {
                 e.anchorStatus(),
                 e.ipfsCid(),
                 e.contentHash(),
-                null);
+                null,
+                e.onchainId());
     }
 }

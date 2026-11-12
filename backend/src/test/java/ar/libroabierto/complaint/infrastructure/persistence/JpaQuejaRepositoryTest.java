@@ -125,6 +125,68 @@ class JpaQuejaRepositoryTest {
         assertThat(repositorio.pendientesDeAnclaje()).isEmpty();
     }
 
+    @Test
+    void porContentHashEncuentraLaQuejaConSuEmpresaYSuIdOnChain() {
+        UUID id = queja("PENDIENTE", null, "2026-10-18T12:00:00Z");
+        queja("PENDIENTE", null, "2026-10-18T13:00:00Z");
+        jdbc.update("UPDATE queja SET content_hash = ?, ipfs_cid = 'bafy-doc', anchor_status = 'CONFIRMADA', "
+                + "onchain_id = 3 WHERE id = ?", HASH, id);
+
+        Queja queja = repositorio.porContentHash(HASH).orElseThrow();
+
+        assertThat(queja.id()).isEqualTo(id);
+        assertThat(queja.empresa().cuit()).isEqualTo("30712345678");
+        assertThat(queja.anchorStatus()).isEqualTo(AnchorStatus.CONFIRMADA);
+        assertThat(queja.onchainId()).isEqualTo(3L);
+        assertThat(repositorio.porContentHash("0x" + "d".repeat(64))).isEmpty();
+    }
+
+    @Test
+    void guardarUnaQuejaConfirmadaSeteaOnchainIdYConfirmaSuTransaccion() {
+        queja("PENDIENTE", null, "2026-10-18T12:00:00Z");
+        Queja queja = repositorio.pendientesDeAnclaje().get(0);
+        queja.registrarPublicacion("bafy-doc", HASH);
+        queja.marcarEnviada(TX);
+        repositorio.guardar(queja);
+        sincronizar();
+
+        Queja recuperada = repositorio.porContentHash(HASH).orElseThrow();
+        recuperada.confirmarAnclaje(5, TX, 1234);
+        repositorio.guardar(recuperada);
+        sincronizar();
+
+        assertThat(jdbc.queryForMap("SELECT anchor_status, onchain_id FROM queja WHERE id = ?", queja.id()))
+                .containsEntry("anchor_status", "CONFIRMADA")
+                .containsEntry("onchain_id", 5L);
+        List<Map<String, Object>> transacciones = jdbc.queryForList(
+                "SELECT estado, block_number FROM transaccion_blockchain WHERE tx_hash = ?", TX);
+        assertThat(transacciones).hasSize(1);
+        assertThat(transacciones.get(0)).containsEntry("estado", "CONFIRMADA").containsEntry("block_number", 1234L);
+    }
+
+    @Test
+    void siLaTransaccionNoHabiaQuedadoRegistradaLaConfirmacionLaCrea() {
+        // El worker se cayó después de enviar la transacción y antes de guardarla: la queja sigue PENDIENTE.
+        queja("PENDIENTE", null, "2026-10-18T12:00:00Z");
+        Queja queja = repositorio.pendientesDeAnclaje().get(0);
+        queja.registrarPublicacion("bafy-doc", HASH);
+        repositorio.guardar(queja);
+        sincronizar();
+
+        Queja recuperada = repositorio.porContentHash(HASH).orElseThrow();
+        recuperada.confirmarAnclaje(5, TX, 1234);
+        repositorio.guardar(recuperada);
+        sincronizar();
+
+        assertThat(jdbc.queryForMap(
+                "SELECT tipo, referencia_id, estado, block_number FROM transaccion_blockchain WHERE tx_hash = ?", TX))
+                .containsEntry("tipo", "REGISTRO")
+                .containsEntry("referencia_id", queja.id())
+                .containsEntry("estado", "CONFIRMADA")
+                .containsEntry("block_number", 1234L);
+        assertThat(repositorio.pendientesDeAnclaje()).isEmpty();
+    }
+
     private void sincronizar() {
         em.flush();
         em.clear();
@@ -134,11 +196,14 @@ class JpaQuejaRepositoryTest {
         UUID id = UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO queja (id, usuario_id, empresa_id, categoria_declarada, descripcion, monto_reclamado,
-                                   fecha_hecho, anchor_status, created_at)
+                                   fecha_hecho, anchor_status, content_hash, created_at)
                 VALUES (?, ?, ?, 'telecomunicaciones',
                         'Corte de servicio de internet durante 15 días sin respuesta del soporte.',
-                        ?, DATE '2026-10-15', ?, ?::timestamptz)""",
-                id, usuario, empresa, monto, anchorStatus, creadaEn);
+                        ?, DATE '2026-10-15', ?, ?, ?::timestamptz)""",
+                id, usuario, empresa, monto, anchorStatus,
+                // Una queja ya enviada tiene hash (lo exige el esquema); uno distinto por fila para no chocar el UNIQUE.
+                "PENDIENTE".equals(anchorStatus) ? null : String.format("0x%064x", id.getMostSignificantBits() & Long.MAX_VALUE),
+                creadaEn);
         return id;
     }
 

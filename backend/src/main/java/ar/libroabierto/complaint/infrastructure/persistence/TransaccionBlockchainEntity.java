@@ -48,4 +48,9 @@ class TransaccionBlockchainEntity {
         tx.intentos = 1;
         return tx;
     }
+
+    void confirmar(long bloque) {
+        this.estado = "CONFIRMADA";
+        this.blockNumber = bloque;
+    }
 }

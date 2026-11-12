@@ -23,7 +23,7 @@ Libro de quejas de consumo público y verificable: el contenido público de cada
 | Carpeta | Stack | Estado |
 |---|---|---|
 | `contracts/` | Solidity 0.8.24, Foundry, OpenZeppelin 5 (vía npm) | Implementado: `ComplaintRegistry` |
-| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | Ticket de publicación y anclaje completo (worker programado, IPFS, Web3j, JPA + Flyway). Siguiente: listener de eventos |
+| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | Tickets de publicación y anclaje y de listener on-chain completos (worker y listener programados, IPFS, Web3j, JPA + Flyway). Siguiente: triage con LLM |
 | `frontend/` | Next.js, TypeScript, viem | Pendiente |
 | `shared/test-vectors/` | JSON | Vectores del hash canónico, usados por backend y frontend |
 
@@ -51,11 +51,11 @@ Al revisar resultados, mirar también el conteo de tests omitidos (`skipped`), n
 
 Entorno local (PostgreSQL, Kubo, Anvil, con puertos solo en 127.0.0.1): `podman-compose up -d` o `docker compose up -d` desde la raíz.
 
-Configuración del backend por variables de entorno (ver `application.yml`): `DB_URL`, `DB_USER`, `DB_PASSWORD`, `IPFS_API_URL`, `RPC_URL`, `CHAIN_ID`, `CONTRACT_ADDRESS`, `RELAYER_PRIVATE_KEY`, `WORKER_HABILITADO`, `WORKER_INTERVALO`. `RELAYER_PRIVATE_KEY` no tiene valor por defecto: sin ella la aplicación no arranca, y `LibroAbiertoProperties` la enmascara al imprimirse. web3j queda en 5.0.2 a propósito (última versión sobre Jackson 2, como Spring Boot 3.5).
+Configuración del backend por variables de entorno (ver `application.yml`): `DB_URL`, `DB_USER`, `DB_PASSWORD`, `IPFS_API_URL`, `RPC_URL`, `CHAIN_ID`, `CONTRACT_ADDRESS`, `RELAYER_PRIVATE_KEY`, `WORKER_HABILITADO`, `WORKER_INTERVALO`, `LISTENER_HABILITADO`, `LISTENER_INTERVALO`, `LISTENER_BLOQUE_INICIAL`, `LISTENER_CONFIRMACIONES`, `LISTENER_MAX_BLOQUES_POR_LOTE`. `RELAYER_PRIVATE_KEY` no tiene valor por defecto: sin ella la aplicación no arranca, y `LibroAbiertoProperties` la enmascara al imprimirse. web3j queda en 5.0.2 a propósito (última versión sobre Jackson 2, como Spring Boot 3.5).
 
 Los valores esperados de `shared/test-vectors/canonical-hash.json` no se generan con el código que prueban: la forma canónica se contrasta con la librería `canonicalize` (npm) y el hash se calcula con `cast keccak`.
 
-En el backend, el dominio no conoce Web3j ni el proveedor del LLM: se accede por puertos (`BlockchainGateway`, `LlmClient`) con adaptadores reemplazables.
+En el backend, el dominio no conoce Web3j ni el proveedor del LLM: se accede por puertos (`BlockchainGateway`, `LlmClient`) con adaptadores reemplazables. El listener lee eventos con `eth_getLogs` por lotes desde `listener_checkpoint` (polling, no WebSocket) y es idempotente: reprocesar un evento no cambia la queja ni vuelve a disparar el triage.
 
 Persistencia: el esquema lo define solo Flyway (`backend/src/main/resources/db/migration`); Hibernate corre en `ddl-auto: validate`. Las entidades JPA viven en `infrastructure/persistence` y no salen de ahí: el adaptador las traduce al dominio. Un cambio de esquema es una migración nueva, nunca la edición de una ya aplicada.
 

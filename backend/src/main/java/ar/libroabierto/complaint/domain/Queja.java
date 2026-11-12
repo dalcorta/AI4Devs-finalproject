@@ -23,6 +23,8 @@ public class Queja {
     private String ipfsCid;
     private String contentHash;
     private String txHash;
+    private Long onchainId;
+    private Long bloqueConfirmacion;
 
     private Queja(UUID id, UUID usuarioId, Empresa empresa, String categoria, String descripcion,
             BigDecimal montoReclamado, LocalDate fechaHecho, List<String> evidenciasCids, Instant registradaEn) {
@@ -46,13 +48,14 @@ public class Queja {
 
     public static Queja reconstituir(UUID id, UUID usuarioId, Empresa empresa, String categoria, String descripcion,
             BigDecimal montoReclamado, LocalDate fechaHecho, List<String> evidenciasCids, Instant registradaEn,
-            AnchorStatus anchorStatus, String ipfsCid, String contentHash, String txHash) {
+            AnchorStatus anchorStatus, String ipfsCid, String contentHash, String txHash, Long onchainId) {
         Queja queja = new Queja(id, usuarioId, empresa, categoria, descripcion, montoReclamado, fechaHecho,
                 evidenciasCids, registradaEn);
         queja.anchorStatus = Objects.requireNonNull(anchorStatus);
         queja.ipfsCid = ipfsCid;
         queja.contentHash = contentHash;
         queja.txHash = txHash;
+        queja.onchainId = onchainId;
         return queja;
     }
 
@@ -73,6 +76,30 @@ public class Queja {
         }
         this.txHash = Objects.requireNonNull(txHash);
         this.anchorStatus = AnchorStatus.ENVIADA;
+    }
+
+    /**
+     * Aplica el evento ComplaintFiled: la cadena es la fuente de verdad, así que confirma también una queja publicada
+     * que quedó PENDIENTE porque el worker se cayó después de enviar la transacción.
+     *
+     * @return {@code false} si la queja ya estaba confirmada con ese id (evento repetido): no cambia nada.
+     */
+    public boolean confirmarAnclaje(long onchainId, String txHash, long bloque) {
+        if (anchorStatus == AnchorStatus.CONFIRMADA) {
+            if (Objects.equals(this.onchainId, onchainId)) {
+                return false;
+            }
+            throw new IllegalStateException("La queja " + id + " ya está confirmada con el id on-chain "
+                    + this.onchainId + " y llegó otro evento con el id " + onchainId);
+        }
+        if (!estaPublicada()) {
+            throw new IllegalStateException("No se puede confirmar una queja que no fue publicada en IPFS");
+        }
+        this.onchainId = onchainId;
+        this.txHash = Objects.requireNonNull(txHash);
+        this.bloqueConfirmacion = bloque;
+        this.anchorStatus = AnchorStatus.CONFIRMADA;
+        return true;
     }
 
     private void exigirEstado(AnchorStatus esperado) {
@@ -131,5 +158,14 @@ public class Queja {
 
     public String txHash() {
         return txHash;
+    }
+
+    public Long onchainId() {
+        return onchainId;
+    }
+
+    /** Bloque donde se confirmó el anclaje; solo se conoce al aplicar el evento, no al leer la queja de la base. */
+    public Long bloqueConfirmacion() {
+        return bloqueConfirmacion;
     }
 }

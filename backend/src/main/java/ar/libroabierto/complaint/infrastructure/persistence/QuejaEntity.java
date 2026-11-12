@@ -51,6 +51,9 @@ class QuejaEntity {
     @Column(name = "content_hash")
     private String contentHash;
 
+    @Column(name = "onchain_id")
+    private Long onchainId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "anchor_status", nullable = false)
     private AnchorStatus anchorStatus;
@@ -65,10 +68,11 @@ class QuejaEntity {
     protected QuejaEntity() {
     }
 
-    void actualizarAnclaje(String ipfsCid, String contentHash, AnchorStatus anchorStatus) {
+    void actualizarAnclaje(String ipfsCid, String contentHash, AnchorStatus anchorStatus, Long onchainId) {
         this.ipfsCid = ipfsCid;
         this.contentHash = contentHash;
         this.anchorStatus = anchorStatus;
+        this.onchainId = onchainId;
     }
 
     UUID id() {
@@ -105,6 +109,10 @@ class QuejaEntity {
 
     String contentHash() {
         return contentHash;
+    }
+
+    Long onchainId() {
+        return onchainId;
     }
 
     AnchorStatus anchorStatus() {

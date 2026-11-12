@@ -4,7 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import ar.libroabierto.complaint.application.PublicarQuejasPendientes;
 import ar.libroabierto.complaint.application.QuejaRepository;
+import ar.libroabierto.listener.application.CheckpointRepository;
+import ar.libroabierto.listener.application.ProcesarEventosOnChain;
 import java.util.List;
+import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAutoConfiguration;
@@ -26,7 +29,22 @@ class AnclajeConfigTest {
                 }
 
                 @Override
+                public java.util.Optional<ar.libroabierto.complaint.domain.Queja> porContentHash(String hash) {
+                    return java.util.Optional.empty();
+                }
+
+                @Override
                 public void guardar(ar.libroabierto.complaint.domain.Queja queja) {
+                }
+            })
+            .withBean(CheckpointRepository.class, () -> new CheckpointRepository() {
+                @Override
+                public OptionalLong ultimoBloque() {
+                    return OptionalLong.empty();
+                }
+
+                @Override
+                public void guardar(long bloque) {
                 }
             })
             .withPropertyValues(
@@ -35,7 +53,12 @@ class AnclajeConfigTest {
                     "libroabierto.blockchain.contrato=0x5FbDB2315678afecb367f032d93F642f64180aa3",
                     "libroabierto.blockchain.chain-id=31337",
                     "libroabierto.worker.habilitado=true",
-                    "libroabierto.worker.intervalo=PT10S");
+                    "libroabierto.worker.intervalo=PT10S",
+                    "libroabierto.listener.habilitado=true",
+                    "libroabierto.listener.intervalo=PT5S",
+                    "libroabierto.listener.bloque-inicial=0",
+                    "libroabierto.listener.confirmaciones=0",
+                    "libroabierto.listener.max-bloques-por-lote=2000");
 
     @Test
     void sinClaveDelRelayerLaAplicacionNoArranca() {
@@ -49,6 +72,7 @@ class AnclajeConfigTest {
         contexto.withPropertyValues("libroabierto.blockchain.relayer-private-key=" + CLAVE)
                 .run(ctx -> {
                     assertThat(ctx).hasSingleBean(PublicarQuejasPendientes.class);
+                    assertThat(ctx).hasSingleBean(ProcesarEventosOnChain.class);
                     assertThat(ctx.getBean(LibroAbiertoProperties.class).toString()).doesNotContain(CLAVE);
                 });
     }

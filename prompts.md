@@ -263,3 +263,48 @@ Resultado:
 2. **Rojo por el motivo correcto.** Antes del wiring, la aplicación arrancaba pero la queja nunca salía de `PENDIENTE`: el test falló por timeout, no por un error de compilación o de contexto.
 3. **Secretos fuera del repositorio, comprobado.** La clave del relayer no tiene valor por defecto en `application.yml`. Se verificó que el test detecta su ausencia quitando a propósito la validación `@NotBlank`: el test falló y, al restaurarla, volvió a pasar. También se descubrió que sin `spring-boot-starter-validation` las anotaciones no se aplican y la aplicación arrancaría sin clave; se agregó la dependencia.
 4. **Ticket cerrado contra su criterio de aceptación.** El readme pedía "un test de integración con Anvil donde una queja PENDIENTE termina en ENVIADA con su content_hash persistido y una transacción enviada"; el test de aceptación lo cubre con la aplicación real.
+
+---
+
+## Implementación — Listener de eventos on-chain, Ticket 4 (Claude Code)
+
+**Prompt**
+```
+Sí, seguir
+```
+
+Resultado:
+- Dominio: `Queja.confirmarAnclaje(onchainId, txHash, bloque)`. Si la queja ya está confirmada con ese id, devuelve `false` y no cambia nada; si el id es otro, falla. También confirma una queja publicada que quedó `PENDIENTE`, que es lo que pasa si el worker se cae entre enviar la transacción y guardarla. La cadena es la fuente de verdad.
+- Caso de uso `ProcesarEventosOnChain`, que funciona así:
+  - Lee `ComplaintFiled` por lotes de bloques a partir del checkpoint.
+  - Busca cada queja por `content_hash`, la confirma y dispara el triage.
+  - Guarda el checkpoint al terminar cada lote.
+  - Respeta un número configurable de confirmaciones antes de leer un bloque.
+- Puertos `FuenteDeEventos`, `CheckpointRepository` y `DisparadorTriage`.
+- Adaptadores:
+  - `Web3jFuenteDeEventos`, con `eth_getLogs` sobre rangos acotados.
+  - `JpaCheckpointRepository`, un checkpoint por contrato.
+  - `ListenerScheduler`.
+  - `TriageSinImplementar`, un disparador provisorio que solo deja constancia hasta el Ticket 5.
+- El adaptador JPA ahora persiste `onchain_id` y pasa la fila de `transaccion_blockchain` a `CONFIRMADA` con su `block_number`. Si esa fila no existía, porque el worker se cayó, la crea.
+- Migración `V2`: la base exige que `onchain_id` exista si y solo si la queja está `CONFIRMADA`, y que no se envíe ni confirme una queja sin `content_hash`.
+- `PublicacionDeQuejaE2ETest` ahora cubre el recorrido completo PENDIENTE → ENVIADA → CONFIRMADA con la aplicación real, y agrega el criterio de aceptación del reproceso de eventos.
+- 72 tests del backend, 0 fallidos, 0 omitidos.
+
+**Verificación y ajustes humanos**
+1. **Polling en vez de suscripción.** El readme hablaba de "suscripción a logs". Se eligió `eth_getLogs` periódico con checkpoint por estos motivos:
+   - funciona con cualquier RPC HTTP;
+   - no pierde eventos si se corta una conexión WebSocket;
+   - con el tope de bloques por lote respeta el límite de rango de los RPC públicos.
+
+   El costo es una latencia de unos segundos, que no importa para una queja.
+2. **Un test de aceptación que no dependa del azar.** La primera versión del test de reproceso borraba el checkpoint mientras el scheduler corría. Eso es una carrera: el scheduler podía volver a escribir el checkpoint sin haber releído nada, y el test pasaría sin probar lo que dice. Se reemplazó por un listener nuevo sin checkpoint que relee todos los eventos reales de Anvil contra la base real. El test exige que haya eventos ignorados, que la fila quede idéntica y que el triage se haya disparado una sola vez.
+3. **Un fake que mentía.** Un test unitario falló: si la base falla al guardar, el siguiente intento no volvía a disparar el triage. El código estaba bien. El problema era el repositorio en memoria del test, que devolvía la misma instancia y "recordaba" una confirmación que nunca se había guardado. Se cambió para que devuelva copias, como hace PostgreSQL.
+4. **Garantías comprobadas rompiéndolas a propósito.**
+   - Sin el chequeo de idempotencia fallan el test unitario de reproceso y el de aceptación contra Anvil y PostgreSQL.
+   - Si el checkpoint se guarda antes de procesar el lote, falla el test que exige reintentar el lote cuando la base no está disponible.
+   - En ambos casos, al restaurar el código vuelve a pasar todo.
+5. **Un fallo del triage no frena al listener.** La confirmación ya quedó guardada, así que el error se registra en el log y el checkpoint avanza. Como un evento repetido no vuelve a disparar el triage, el Ticket 5 tendrá que recuperar las quejas `CONFIRMADA` que no tengan triage, en lugar de depender solo de este aviso.
+6. **Pendientes conocidos.**
+   - `StatusChanged` todavía no se procesa, porque el backend aún no tiene el flujo del funcionario que cambia estados.
+   - Una transacción minada pero revertida sigue dejando la queja `ENVIADA`; falta pasarla a `FALLIDA`.

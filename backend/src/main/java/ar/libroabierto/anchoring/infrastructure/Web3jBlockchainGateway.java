@@ -4,11 +4,9 @@ import ar.libroabierto.anchoring.application.BlockchainGateway;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.util.List;
-import org.web3j.abi.EventEncoder;
 import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.FunctionReturnDecoder;
 import org.web3j.abi.TypeReference;
-import org.web3j.abi.datatypes.Event;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Bytes32;
@@ -31,12 +29,6 @@ import org.web3j.utils.Numeric;
  * después de un envío exitoso devuelve la transacción original en lugar de anclar la queja dos veces.
  */
 public class Web3jBlockchainGateway implements BlockchainGateway {
-
-    static final Event COMPLAINT_FILED = new Event("ComplaintFiled", List.of(
-            new TypeReference<Uint256>(true) { },
-            new TypeReference<Uint64>(true) { },
-            new TypeReference<Bytes32>() { },
-            new TypeReference<Utf8String>() { }));
 
     private final Web3j web3j;
     private final Credentials relayer;
@@ -95,7 +87,7 @@ public class Web3jBlockchainGateway implements BlockchainGateway {
 
     private String transaccionDeRegistro(BigInteger id) throws IOException {
         EthFilter filtro = new EthFilter(DefaultBlockParameterName.EARLIEST, DefaultBlockParameterName.LATEST, contrato)
-                .addSingleTopic(EventEncoder.encode(COMPLAINT_FILED))
+                .addSingleTopic(ComplaintRegistryAbi.COMPLAINT_FILED_TOPIC)
                 .addSingleTopic(Numeric.toHexStringWithPrefixZeroPadded(id, 64));
         EthLog logs = web3j.ethGetLogs(filtro).send();
         exigirSinError(logs, "Falló la búsqueda del evento ComplaintFiled");

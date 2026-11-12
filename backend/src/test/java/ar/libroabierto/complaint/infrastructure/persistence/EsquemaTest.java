@@ -25,10 +25,41 @@ class EsquemaTest {
     private JdbcTemplate jdbc;
 
     @Test
-    void flywayAplicaLaMigracionInicial() {
-        Integer aplicadas = jdbc.queryForObject(
-                "SELECT count(*) FROM flyway_schema_history WHERE success AND version = '1'", Integer.class);
-        assertThat(aplicadas).isEqualTo(1);
+    void flywayAplicaLasMigraciones() {
+        assertThat(jdbc.queryForList("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank",
+                String.class)).containsExactly("1", "2");
+    }
+
+    @Test
+    void unaQuejaConfirmadaSinOnchainIdEsRechazada() {
+        UUID queja = queja(HASH);
+
+        assertThatThrownBy(() -> jdbc.update("UPDATE queja SET anchor_status = 'CONFIRMADA' WHERE id = ?", queja))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void unOnchainIdSinConfirmarEsRechazado() {
+        UUID queja = queja(HASH);
+
+        assertThatThrownBy(() -> jdbc.update("UPDATE queja SET onchain_id = 1 WHERE id = ?", queja))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void unaQuejaConfirmadaConContentHashYOnchainIdEsValida() {
+        UUID queja = queja(HASH);
+
+        assertThat(jdbc.update("UPDATE queja SET anchor_status = 'CONFIRMADA', onchain_id = 1 WHERE id = ?", queja))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void unaQuejaNoSeEnviaSinContentHash() {
+        UUID queja = queja(null);
+
+        assertThatThrownBy(() -> jdbc.update("UPDATE queja SET anchor_status = 'ENVIADA' WHERE id = ?", queja))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
