@@ -471,6 +471,7 @@ paths:
                   anchorStatus: { type: string, enum: [PENDIENTE] }
         '400': { description: Datos inválidos (p. ej. CUIT con dígito verificador incorrecto) }
         '401': { description: No autenticado }
+        '403': { description: El usuario no es un ciudadano con identidad verificada }
         '429': { description: Límite diario de quejas alcanzado }
 
   /api/quejas/{id}:

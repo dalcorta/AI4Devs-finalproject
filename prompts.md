@@ -401,7 +401,7 @@ Resultado:
    - correr el límite diario en uno;
    - quitar el hash de relleno del login;
    - abrir el endpoint sin token.
-5. **Una diferencia con el readme, señalada sin cambiarlo.** La especificación de `POST /api/quejas` no lista `403`, pero la HU-01 exige un ciudadano verificado. El endpoint responde `403` a un usuario que no es ciudadano o que no tiene la identidad verificada.
+5. **Una diferencia con el readme, señalada sin cambiarlo.** La especificación de `POST /api/quejas` no lista `403`, pero la HU-01 exige un ciudadano verificado. El endpoint responde `403` a un usuario que no es ciudadano o que no tiene la identidad verificada. Con el visto bueno humano, se agregó el `403` a la especificación del readme.
 6. **Pendientes conocidos.**
    - El límite diario cuenta antes de insertar, así que dos pedidos simultáneos podrían pasarlo por uno.
    - No hay límite de intentos de login.
