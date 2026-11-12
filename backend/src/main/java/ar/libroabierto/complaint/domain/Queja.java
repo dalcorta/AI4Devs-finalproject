@@ -44,6 +44,18 @@ public class Queja {
                 evidenciasCids, registradaEn);
     }
 
+    public static Queja reconstituir(UUID id, UUID usuarioId, Empresa empresa, String categoria, String descripcion,
+            BigDecimal montoReclamado, LocalDate fechaHecho, List<String> evidenciasCids, Instant registradaEn,
+            AnchorStatus anchorStatus, String ipfsCid, String contentHash, String txHash) {
+        Queja queja = new Queja(id, usuarioId, empresa, categoria, descripcion, montoReclamado, fechaHecho,
+                evidenciasCids, registradaEn);
+        queja.anchorStatus = Objects.requireNonNull(anchorStatus);
+        queja.ipfsCid = ipfsCid;
+        queja.contentHash = contentHash;
+        queja.txHash = txHash;
+        return queja;
+    }
+
     public boolean estaPublicada() {
         return contentHash != null;
     }

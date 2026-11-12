@@ -23,7 +23,7 @@ Libro de quejas de consumo público y verificable: el contenido público de cada
 | Carpeta | Stack | Estado |
 |---|---|---|
 | `contracts/` | Solidity 0.8.24, Foundry, OpenZeppelin 5 (vía npm) | Implementado: `ComplaintRegistry` |
-| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | En curso: hash canónico, worker de publicación, adaptadores Web3j e IPFS (Kubo); faltan persistencia y wiring Spring |
+| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | En curso: hash canónico, worker de publicación, adaptadores Web3j, IPFS (Kubo) y JPA + Flyway; falta el wiring Spring |
 | `frontend/` | Next.js, TypeScript, viem | Pendiente |
 | `shared/test-vectors/` | JSON | Vectores del hash canónico, usados por backend y frontend |
 
@@ -54,6 +54,8 @@ Entorno local (PostgreSQL, Kubo, Anvil, con puertos solo en 127.0.0.1): `podman-
 Los valores esperados de `shared/test-vectors/canonical-hash.json` no se generan con el código que prueban: la forma canónica se contrasta con la librería `canonicalize` (npm) y el hash se calcula con `cast keccak`.
 
 En el backend, el dominio no conoce Web3j ni el proveedor del LLM: se accede por puertos (`BlockchainGateway`, `LlmClient`) con adaptadores reemplazables.
+
+Persistencia: el esquema lo define solo Flyway (`backend/src/main/resources/db/migration`); Hibernate corre en `ddl-auto: validate`. Las entidades JPA viven en `infrastructure/persistence` y no salen de ahí: el adaptador las traduce al dominio. Un cambio de esquema es una migración nueva, nunca la edición de una ya aplicada.
 
 ## Git
 

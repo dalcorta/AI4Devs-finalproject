@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: libroabierto-backend
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://127.0.0.1:5432/libroabierto}
+    username: ${DB_USER:libroabierto}
+    password: ${DB_PASSWORD:libroabierto-dev}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # El esquema lo maneja Flyway; Hibernate solo verifica que las entidades coincidan.
+      ddl-auto: validate

@@ -680,7 +680,7 @@ Criterios de aceptación:
 - **Tipo:** Base de datos · **HU:** HU-01, HU-02, HU-03, HU-04 · **Estimación:** 3 pts
 - **Descripción:** crear el esquema de la sección 3 con migraciones Flyway.
 - **Tareas:**
-  - `V1__init.sql` con todas las tablas, PK, FK, `UNIQUE` (`empresa.cuit`, `queja.onchain_id`, `triage.queja_id`, `transaccion_blockchain.tx_hash`) y `CHECK` para los enums.
+  - `V1__init.sql` con todas las tablas, PK, FK, `UNIQUE` (`empresa.cuit`, `queja.onchain_id`, `queja.content_hash`, `triage.queja_id`, `transaccion_blockchain.tx_hash`) y `CHECK` para los enums.
   - Índices: `queja(empresa_id, created_at DESC)`, `queja(estado)`, `triage(prioridad)`.
   - Configurar el cifrado de `dni_cifrado` con un `AttributeConverter` JPA y una clave por variable de entorno.
   - Script de seed con usuarios de prueba (ciudadano, funcionario, empresa) y 3 empresas ficticias.

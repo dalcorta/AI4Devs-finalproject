@@ -221,3 +221,24 @@ Resultado:
 1. **Un verde falso detectado.** La primera corrida "pasó", pero los 3 tests figuraban como omitidos: con `disabledWithoutDocker`, Testcontainers los salteaba en silencio al no encontrar el socket. Se detectó leyendo el conteo de tests omitidos en el reporte, no el resultado global. Se quitó esa opción: ahora, sin motor de contenedores, el test falla con un error explícito (verificado).
 2. **Cambios persistentes en la máquina, decididos por el desarrollador.** El socket de la API de Podman estaba deshabilitado. Activarlo es un servicio de systemd persistente; el modo automático de Claude Code bloqueó que la IA lo hiciera por su cuenta. Para no frenar el trabajo, la IA levantó la API de Podman de forma temporal (se apaga sola) solo para correr los tests, y dejó la activación permanente documentada en `CLAUDE.md` para que la haga el desarrollador.
 3. **Límite técnico resuelto en el camino.** El primer intento de socket temporal falló porque la ruta superaba los 108 caracteres que admite un socket Unix; se usó una ruta corta.
+
+---
+
+## Implementación — Persistencia con Flyway y JPA (Claude Code)
+
+**Prompt**
+```
+Sí, seguir
+```
+
+Resultado:
+- `V1__init.sql`: el esquema completo de la sección 3 del readme, con `CHECK` para cada enum, validación de formato del CUIT y del `content_hash`, e índice parcial para las quejas pendientes que lee el worker.
+- Entidades JPA separadas del dominio y `JpaQuejaRepository`, el adaptador del puerto `QuejaRepository`: lee las pendientes con su empresa y evidencias, persiste el avance del anclaje y registra cada transacción en `transaccion_blockchain` una sola vez.
+- `EsquemaTest` (7 tests, criterios del Ticket 1) y `JpaQuejaRepositoryTest` (4 tests), contra PostgreSQL 16.15 en Testcontainers. 39 tests del backend en total.
+
+**Verificación y ajustes humanos**
+1. **Una inconsistencia del diseño corregida.** El readme define `content_hash` como clave única de correlación, pero la lista de restricciones del Ticket 1 no lo incluía. Se agregó el `UNIQUE` en la migración y en el readme, con test.
+2. **El hash sobrevive a la base de datos, y está probado.** `numeric(14,2)` devuelve `15000.00` donde se guardó `15000`. Un test reconstruye el documento público desde una queja leída de PostgreSQL y exige el hash del vector compartido: pasa porque JCS normaliza los números. Sin la canonicalización, este redondeo de la base cambiaría el hash y la verificación en el navegador fallaría.
+3. **Hibernate no toca el esquema.** `ddl-auto: validate` hace que cualquier diferencia entre entidades y migración rompa el arranque en lugar de corregirse en silencio.
+4. **Idempotencia comprobada otra vez a propósito.** Se quitó el chequeo de transacción existente: el test que guarda dos veces una queja enviada falló por la restricción única de `tx_hash`; al restaurarlo volvió a pasar.
+5. **Pendientes conocidos.** El alta de quejas nuevas queda para el caso de uso `RegistrarQueja` (con sus tests). Del Ticket 1 faltan el cifrado de `dni_cifrado` y `telefono_cifrado` y el seed. Con más de una instancia del worker habrá que tomar las pendientes con `FOR UPDATE SKIP LOCKED`.
