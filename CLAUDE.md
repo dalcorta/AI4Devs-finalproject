@@ -23,7 +23,7 @@ Libro de quejas de consumo público y verificable: el contenido público de cada
 | Carpeta | Stack | Estado |
 |---|---|---|
 | `contracts/` | Solidity 0.8.24, Foundry, OpenZeppelin 5 (vía npm) | Implementado: `ComplaintRegistry` |
-| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | En curso: hash canónico, worker de publicación, adaptadores Web3j, IPFS (Kubo) y JPA + Flyway; falta el wiring Spring |
+| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | Ticket de publicación y anclaje completo (worker programado, IPFS, Web3j, JPA + Flyway). Siguiente: listener de eventos |
 | `frontend/` | Next.js, TypeScript, viem | Pendiente |
 | `shared/test-vectors/` | JSON | Vectores del hash canónico, usados por backend y frontend |
 
@@ -49,7 +49,9 @@ Al revisar resultados, mirar también el conteo de tests omitidos (`skipped`), n
 
 `Web3jBlockchainGatewayTest` levanta un Anvil real y despliega el artefacto de `contracts/out/`: correr `forge build` antes.
 
-Entorno local (PostgreSQL, Kubo, Anvil, con puertos solo en 127.0.0.1): `podman-compose up -d` o `docker compose up -d` desde la raíz. web3j queda en 5.0.2 a propósito (última versión sobre Jackson 2, como Spring Boot 3.5).
+Entorno local (PostgreSQL, Kubo, Anvil, con puertos solo en 127.0.0.1): `podman-compose up -d` o `docker compose up -d` desde la raíz.
+
+Configuración del backend por variables de entorno (ver `application.yml`): `DB_URL`, `DB_USER`, `DB_PASSWORD`, `IPFS_API_URL`, `RPC_URL`, `CHAIN_ID`, `CONTRACT_ADDRESS`, `RELAYER_PRIVATE_KEY`, `WORKER_HABILITADO`, `WORKER_INTERVALO`. `RELAYER_PRIVATE_KEY` no tiene valor por defecto: sin ella la aplicación no arranca, y `LibroAbiertoProperties` la enmascara al imprimirse. web3j queda en 5.0.2 a propósito (última versión sobre Jackson 2, como Spring Boot 3.5).
 
 Los valores esperados de `shared/test-vectors/canonical-hash.json` no se generan con el código que prueban: la forma canónica se contrasta con la librería `canonicalize` (npm) y el hash se calcula con `cast keccak`.
 

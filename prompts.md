@@ -242,3 +242,24 @@ Resultado:
 3. **Hibernate no toca el esquema.** `ddl-auto: validate` hace que cualquier diferencia entre entidades y migración rompa el arranque en lugar de corregirse en silencio.
 4. **Idempotencia comprobada otra vez a propósito.** Se quitó el chequeo de transacción existente: el test que guarda dos veces una queja enviada falló por la restricción única de `tx_hash`; al restaurarlo volvió a pasar.
 5. **Pendientes conocidos.** El alta de quejas nuevas queda para el caso de uso `RegistrarQueja` (con sus tests). Del Ticket 1 faltan el cifrado de `dni_cifrado` y `telefono_cifrado` y el seed. Con más de una instancia del worker habrá que tomar las pendientes con `FOR UPDATE SKIP LOCKED`.
+
+---
+
+## Implementación — Wiring Spring y test de aceptación del ticket (Claude Code)
+
+**Prompt**
+```
+Sí, seguir
+```
+
+Resultado:
+- `LibroAbiertoProperties` (propiedades tipadas y validadas), `AnclajeConfig` (beans de Web3j, IPFS y el worker) y `PublicacionScheduler` (`@Scheduled` con `fixedDelay`, así dos pasadas nunca se superponen).
+- `PublicacionDeQuejaE2ETest`: arranca la aplicación completa contra PostgreSQL y Kubo en Testcontainers y un Anvil con el contrato desplegado. Inserta una queja `PENDIENTE` y espera, sin invocar nada a mano, a que el scheduler la deje `ENVIADA`.
+- `AnclajeConfigTest`: sin clave del relayer la aplicación no arranca, y la clave no aparece al imprimir la configuración.
+- La preparación de Anvil se extrajo a `AnvilLocal`, compartida por el test del adaptador y el de aceptación. 42 tests del backend en total.
+
+**Verificación y ajustes humanos**
+1. **El test de aceptación mide la promesa del producto, no solo el estado.** Además de `ENVIADA`, comprueba que el contenido que quedó en IPFS hashea exactamente al `contentHash` anclado en el contrato (lo que hará el navegador en HU-02) y que el documento no contiene el nombre, el email ni el teléfono del denunciante cargados en la base.
+2. **Rojo por el motivo correcto.** Antes del wiring, la aplicación arrancaba pero la queja nunca salía de `PENDIENTE`: el test falló por timeout, no por un error de compilación o de contexto.
+3. **Secretos fuera del repositorio, comprobado.** La clave del relayer no tiene valor por defecto en `application.yml`. Se verificó que el test detecta su ausencia quitando a propósito la validación `@NotBlank`: el test falló y, al restaurarla, volvió a pasar. También se descubrió que sin `spring-boot-starter-validation` las anotaciones no se aplican y la aplicación arrancaría sin clave; se agregó la dependencia.
+4. **Ticket cerrado contra su criterio de aceptación.** El readme pedía "un test de integración con Anvil donde una queja PENDIENTE termina en ENVIADA con su content_hash persistido y una transacción enviada"; el test de aceptación lo cubre con la aplicación real.

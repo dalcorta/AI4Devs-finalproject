@@ -10,3 +10,16 @@ spring:
     hibernate:
       # El esquema lo maneja Flyway; Hibernate solo verifica que las entidades coincidan.
       ddl-auto: validate
+
+libroabierto:
+  ipfs:
+    api-url: ${IPFS_API_URL:http://127.0.0.1:5001}
+  blockchain:
+    rpc-url: ${RPC_URL:http://127.0.0.1:8545}
+    chain-id: ${CHAIN_ID:31337}
+    contrato: ${CONTRACT_ADDRESS:}
+    # Sin valor por defecto a propósito: la clave del relayer nunca vive en el repositorio.
+    relayer-private-key: ${RELAYER_PRIVATE_KEY:}
+  worker:
+    habilitado: ${WORKER_HABILITADO:true}
+    intervalo: ${WORKER_INTERVALO:PT10S}
