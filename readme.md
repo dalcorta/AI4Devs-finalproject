@@ -117,6 +117,7 @@ flowchart LR
 
     subgraph Backend [Backend Spring Boot]
         API[API REST<br/>auth JWT + roles]
+        WRK[Worker de publicación<br/>outbox poller]
         ANC[Servicio de anclaje<br/>Web3j relayer]
         LST[Listener de eventos<br/>Web3j]
         TRI[Servicio de triage<br/>cliente LLM]
@@ -129,12 +130,15 @@ flowchart LR
     LLM[LLM<br/>Ollama / API]
 
     FE -->|HTTPS| API
-    API --> DB
-    API -->|JSON público| IPFS
-    API --> ANC
+    API -->|guarda PENDIENTE| DB
+    WRK -->|lee pendientes| DB
+    WRK -->|JSON público| IPFS
+    WRK -->|guarda content_hash, ENVIADA| DB
+    WRK --> ANC
     ANC -->|tx firmada| BC
     BC -->|evento ComplaintFiled| LST
-    LST --> DB
+    LST -->|busca queja por content_hash| DB
+    LST -->|actualiza onchain_id, CONFIRMADA| DB
     LST --> TRI
     TRI --> LLM
     TRI --> DB
@@ -143,7 +147,7 @@ flowchart LR
     FE -->|lectura de contenido| IPFS
 ```
 
-**Patrón.** Monolito modular en el backend con un flujo **orientado a eventos**: la blockchain actúa como log inmutable y el listener reacciona a sus eventos. El patrón es análogo a un *outbox* donde el registro de verdad sobre la integridad es la cadena.
+**Patrón.** Monolito modular en el backend con un flujo **orientado a eventos**: la blockchain actúa como log inmutable y el listener reacciona a sus eventos. Es un patrón **outbox**: `POST /api/quejas` solo persiste la queja en PostgreSQL con `anchor_status = PENDIENTE` y responde 202; un **worker de publicación** (poller en segundo plano) es quien de verdad sube el JSON a IPFS, calcula el `content_hash` y dispara la transacción, dejando la queja en `ENVIADA`. La clave de correlación entre el evento on-chain y la fila en PostgreSQL es el **`content_hash`** (único): el worker lo calcula y persiste *antes* de enviar la transacción, así que cuando el listener recibe `ComplaintFiled` —que trae el hash pero no el UUID interno— busca la queja por ese hash para completar `onchain_id` y pasarla a `CONFIRMADA`.
 
 **Por qué esta arquitectura.**
 - **Blockchain como capa de anclaje, no como base de datos.** On-chain solo van hashes, CID, CUIT y estado. Es barato, rápido y evita publicar datos personales en un medio inmutable.
@@ -162,13 +166,15 @@ flowchart LR
 |---|---|---|
 | Smart contract `ComplaintRegistry` | Solidity 0.8.x, OpenZeppelin `AccessControl`, Foundry | Registrar quejas (hash, CID, CUIT), registrar cambios de estado, emitir eventos. Roles: `RELAYER_ROLE`, `OFFICER_ROLE`. |
 | Frontend | Next.js (TypeScript), viem, Tailwind | Formularios, consulta pública, panel del funcionario y verificación de integridad en el navegador. |
-| API REST | Spring Boot 3, Java 21, Spring Security (JWT) | Casos de uso, autenticación y autorización por rol, validación. |
+| API REST | Spring Boot 3, Java 21, Spring Security (JWT) | Casos de uso, autenticación y autorización por rol, validación. Persiste la queja como `PENDIENTE`; no publica ni ancla de forma síncrona. |
+| Worker de publicación | Spring `@Scheduled` (patrón outbox) | Toma quejas `PENDIENTE`, publica el JSON público en IPFS, calcula el `content_hash` canónico y dispara el anclaje. |
 | Servicio de anclaje | Web3j | Construye, firma y envía transacciones; guarda `tx_hash` y confirma bloques. |
-| Listener | Web3j (suscripción a logs + checkpoint de bloque) | Detecta `ComplaintFiled` y `StatusChanged`; es idempotente y se recupera desde el último bloque procesado. |
-| Servicio de triage | Spring AI (cliente compatible con Ollama/OpenAI) | Prompt de extracción con salida JSON validada contra un esquema; reintentos ante salidas inválidas. |
+| Listener | Web3j (suscripción a logs + checkpoint de bloque) | Detecta `ComplaintFiled` y `StatusChanged`; correlaciona el evento con la queja por `content_hash`; es idempotente y se recupera desde el último bloque procesado. |
+| Servicio de triage | Spring AI (cliente compatible con Ollama/OpenAI) | Prompt de extracción con salida JSON validada contra un esquema y contra una lista cerrada de artículos de la Ley 24.240; reintentos ante salidas inválidas. |
 | Base de datos | PostgreSQL 16, Flyway | Datos de usuarios, quejas, triage, historial de estados y checkpoint del listener. |
 | Almacenamiento público | IPFS (Kubo en local, Pinata en despliegue) | Documento JSON público de cada queja y evidencias públicas. |
-| LLM | Ollama (Llama 3.x 8B) en local; proveedor por API en el despliegue | Solo procesa el **texto público** de la queja, nunca datos personales. |
+| LLM (triage) | Proveedor por API en el despliegue (texto ya público, tras confirmar on-chain) | Clasifica, resume y prioriza. Solo procesa el **texto público** de la queja, nunca datos personales. |
+| LLM (detección de PII, should-have) | Ollama local, siempre, sin importar el proveedor del triage | HU-06: analiza la descripción **antes** de publicarla, cuando todavía no es pública; por eso corre siempre en local y nunca contra un proveedor externo. |
 | Mock organismo (should-have) | Módulo Spring | Simula la recepción de un expediente y devuelve un número de trámite. |
 
 ### **2.3. Descripción de alto nivel del proyecto y estructura de ficheros**
@@ -250,6 +256,7 @@ erDiagram
         varchar rol "NOT NULL: CIUDADANO | FUNCIONARIO | EMPRESA"
         varchar nombre_completo "NOT NULL"
         bytea dni_cifrado "NULL (solo ciudadanos)"
+        bytea telefono_cifrado "NULL (solo ciudadanos)"
         boolean identidad_verificada "NOT NULL DEFAULT false"
         uuid empresa_id FK "NULL (solo rol EMPRESA)"
         timestamptz created_at "NOT NULL"
@@ -346,9 +353,9 @@ event StatusChanged(uint256 indexed id, Status previous, Status current, bytes32
 
 ### **3.2. Descripción de entidades principales:**
 
-- **USUARIO:** persona que usa el sistema, con un rol. Contiene los únicos datos personales del sistema; el DNI se guarda cifrado. `identidad_verificada` simula la verificación con MiBA en el MVP.
+- **USUARIO:** persona que usa el sistema, con un rol. Contiene los únicos datos personales del sistema; el DNI y el teléfono se guardan cifrados. `identidad_verificada` simula la verificación con MiBA en el MVP.
 - **EMPRESA:** entidad denunciada, identificada por su CUIT único (validado con dígito verificador).
-- **QUEJA:** núcleo del dominio. Guarda la versión de trabajo de la queja y las referencias a su publicación (`ipfs_cid`, `content_hash`, `onchain_id`). `estado` sigue la máquina de estados `REGISTRADA → EN_REVISION → DERIVADA → RESUELTA | DESESTIMADA`.
+- **QUEJA:** núcleo del dominio. Guarda la versión de trabajo de la queja y las referencias a su publicación (`ipfs_cid`, `content_hash`, `onchain_id`). `estado` sigue la máquina de estados `REGISTRADA → EN_REVISION → DERIVADA → RESUELTA | DESESTIMADA`. `content_hash` se calcula y persiste *antes* de enviar la transacción de anclaje, y es la clave que el listener usa para encontrar esta fila al recibir el evento `ComplaintFiled` (que no trae el UUID interno).
 - **EVIDENCIA:** archivos públicos adjuntos a una queja (fotos del producto, capturas), publicados en IPFS. Las facturas con datos personales no se publican.
 - **TRIAGE:** resultado del LLM, en relación 1 a 1 con la queja. Guarda el modelo usado, para trazabilidad.
 - **CAMBIO_ESTADO:** historial auditable de transiciones; cada una se ancla on-chain y guarda su `tx_hash`.
@@ -384,6 +391,49 @@ info:
   title: LibroAbierto API
   version: 0.1.0
 paths:
+  /api/auth/login:
+    post:
+      summary: Autenticar usuario y obtener token (acceso de ciudadano, funcionario o empresa)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: Autenticado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  rol: { type: string, enum: [CIUDADANO, FUNCIONARIO, EMPRESA] }
+        '401': { description: Credenciales inválidas }
+
+  /api/empresas:
+    get:
+      summary: Buscar empresas por CUIT o razón social (buscador de "/")
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Empresas que coinciden con la búsqueda
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    cuit: { type: string }
+                    razonSocial: { type: string }
+
   /api/quejas:
     post:
       summary: Registrar una queja (rol CIUDADANO)
@@ -416,6 +466,65 @@ paths:
         '401': { description: No autenticado }
         '429': { description: Límite diario de quejas alcanzado }
 
+  /api/quejas/{id}:
+    get:
+      summary: Detalle público de una queja
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Detalle con contenido, historial de estados y evidencias
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  onchainId: { type: integer }
+                  ipfsCid: { type: string }
+                  contentHash: { type: string }
+                  estado: { type: string }
+                  historialEstados:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        estadoAnterior: { type: string }
+                        estadoNuevo: { type: string }
+                        txHash: { type: string }
+                        createdAt: { type: string, format: date-time }
+                  evidenciasCids:
+                    type: array
+                    items: { type: string }
+        '404': { description: Queja no encontrada }
+
+  /api/quejas/{id}/evidencias:
+    post:
+      summary: Adjuntar evidencia pública a una queja (rol CIUDADANO, dueño de la queja)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                archivo: { type: string, format: binary }
+      responses:
+        '201':
+          description: Evidencia subida a IPFS
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ipfsCid: { type: string }
+                  mimeType: { type: string }
+        '403': { description: La queja no pertenece al usuario autenticado }
+        '409': { description: La queja ya fue anclada; no admite nuevas evidencias }
+
   /api/empresas/{cuit}/quejas:
     get:
       summary: Listado público de quejas de una empresa
@@ -443,6 +552,35 @@ paths:
                         categoria: { type: string }
                         fechaHecho: { type: string, format: date }
         '404': { description: Empresa no encontrada }
+
+  /api/panel/quejas:
+    get:
+      summary: Bandeja del funcionario, ordenada por prioridad de triage
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: estado, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Quejas con su triage, ordenadas por prioridad y luego por antigüedad
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        empresa: { type: string }
+                        categoriaSugerida: { type: string }
+                        resumen: { type: string }
+                        prioridad: { type: string, enum: [BAJA, MEDIA, ALTA] }
+                        estado: { type: string }
+                        createdAt: { type: string, format: date-time }
+        '403': { description: El usuario no tiene rol FUNCIONARIO }
 
   /api/quejas/{id}/estado:
     patch:
@@ -526,7 +664,7 @@ Criterios de aceptación:
 
 **Should-have**
 - **HU-05 — Respuesta de la empresa:** un usuario con rol EMPRESA responde a una queja contra su CUIT; la respuesta se publica en IPFS y se ancla.
-- **HU-06 — Detección de datos personales:** antes de publicar, el LLM analiza la descripción y, si detecta datos personales, avisa al ciudadano y le pide que los quite o confirme.
+- **HU-06 — Detección de datos personales:** antes de publicar, el LLM analiza la descripción y, si detecta datos personales, avisa al ciudadano y le pide que los quite o confirme. Esta verificación corre **siempre con un modelo local (Ollama)**, nunca contra el proveedor por API usado para el triage post-publicación: en este punto la descripción todavía no es pública, así que no puede salir del backend.
 
 ---
 
@@ -543,19 +681,51 @@ Criterios de aceptación:
   - Script de seed con usuarios de prueba (ciudadano, funcionario, empresa) y 3 empresas ficticias.
 - **Criterios de aceptación:** `flyway migrate` corre limpio sobre una base vacía; un test con Testcontainers verifica las restricciones (CUIT duplicado → error; triage duplicado → error).
 
-**Ticket 2 — [Backend] Anclaje de queja y listener de eventos**
+**Ticket 2 — [Smart Contract] ComplaintRegistry**
 
-- **Tipo:** Backend · **HU:** HU-01, HU-03 · **Estimación:** 8 pts
-- **Descripción:** implementar el flujo asíncrono desde `POST /api/quejas` hasta la confirmación on-chain y el procesamiento del evento.
+- **Tipo:** Smart contract · **HU:** HU-01, HU-04 · **Estimación:** 5 pts
+- **Descripción:** contrato Solidity que registra quejas y cambios de estado, con control de acceso por roles.
+- **Tareas:**
+  - `struct Complaint`, `enum Status` y las funciones `fileComplaint` (`RELAYER_ROLE`) y `changeStatus` (`OFFICER_ROLE`).
+  - Eventos `ComplaintFiled` y `StatusChanged`.
+  - `AccessControl` de OpenZeppelin para los roles; administración de roles restringida al admin.
+  - Script de despliegue (`Deploy.s.sol`) parametrizado por red (local / testnet).
+- **Criterios de aceptación (Foundry):** `fileComplaint` emite `ComplaintFiled` con los datos correctos; llamar `fileComplaint` o `changeStatus` sin el rol correspondiente revierte; una transición de estado inválida revierte; los tests cubren el camino feliz y los de rechazo.
+
+**Ticket 3 — [Backend] Publicación y anclaje asíncrono de la queja**
+
+- **Tipo:** Backend · **HU:** HU-01 · **Estimación:** 5 pts
+- **Descripción:** desde `POST /api/quejas` hasta que la queja queda publicada en IPFS y la transacción de anclaje enviada (patrón outbox; ver [2.1](#21-diagrama-de-arquitectura)).
 - **Tareas:**
   - Caso de uso `RegistrarQueja`: valida, persiste con `anchor_status = PENDIENTE` y devuelve 202.
   - `JsonCanonicalizer` (RFC 8785) + `keccak256`, con tests de vectores conocidos compartidos con el frontend.
-  - Adaptador IPFS: subida del JSON público y obtención del CID.
+  - Worker de publicación (`@Scheduled`, outbox): toma quejas `PENDIENTE`, sube el JSON público a IPFS, calcula y persiste `content_hash` (clave de correlación con el evento), pasa a `ENVIADA`.
   - `BlockchainGateway` con Web3j: llamada a `fileComplaint`, registro en `transaccion_blockchain`, reintentos con backoff.
-  - Listener: suscripción a `ComplaintFiled` desde `listener_checkpoint.ultimo_bloque`, actualización de `onchain_id` y disparo del triage. Idempotente.
-- **Criterios de aceptación:** test de integración con Anvil donde se registra una queja, se confirma on-chain y el listener actualiza `onchain_id`; tras reiniciar el listener no se duplica el procesamiento.
+- **Criterios de aceptación:** test de integración con Anvil donde una queja `PENDIENTE` termina en `ENVIADA` con su `content_hash` persistido y una transacción enviada; un fallo de IPFS o de la cadena no deja la queja en un estado inconsistente y el worker la reintenta.
 
-**Ticket 3 — [Frontend] Vista pública con verificación de integridad**
+**Ticket 4 — [Backend] Listener de eventos on-chain**
+
+- **Tipo:** Backend · **HU:** HU-01, HU-03 · **Estimación:** 3 pts
+- **Descripción:** procesar `ComplaintFiled` y `StatusChanged`, enlazarlos con la queja por `content_hash` y disparar el triage.
+- **Tareas:**
+  - Suscripción a eventos desde `listener_checkpoint.ultimo_bloque`.
+  - Al recibir `ComplaintFiled`: buscar la queja por `content_hash` (único), actualizar `onchain_id` y `anchor_status = CONFIRMADA`.
+  - Disparar el caso de uso de triage tras confirmar.
+  - Idempotencia: si `onchain_id` ya está seteado, no reprocesar el evento.
+- **Criterios de aceptación:** test de integración con Anvil donde se emite un evento real y el listener actualiza la queja correcta por `content_hash`; al reenviar el mismo evento no se duplica el triage ni se reescribe el estado.
+
+**Ticket 5 — [Backend] Servicio de triage con LLM**
+
+- **Tipo:** Backend / IA · **HU:** HU-03 · **Estimación:** 5 pts
+- **Descripción:** cliente LLM (Spring AI) que recibe el contenido público de una queja confirmada y devuelve categoría, resumen, prioridad y artículos sugeridos.
+- **Tareas:**
+  - Prompt de extracción con el texto público de la queja y una **lista cerrada** de artículos de la Ley 24.240 permitidos.
+  - Validación de la salida contra JSON Schema; reintento hasta 2 veces ante salida inválida; descarte de cualquier artículo citado que no esté en la lista cerrada (mitiga alucinaciones).
+  - Si tras los reintentos sigue fallando, marcar la queja como "Triage manual".
+  - Persistencia en `TRIAGE` con el modelo usado, para trazabilidad.
+- **Criterios de aceptación:** test unitario con una salida de LLM simulada que cite un artículo fuera de la lista cerrada y se descarte; test de idempotencia (mismo evento → un solo triage); test del camino "Triage manual" tras 2 reintentos fallidos.
+
+**Ticket 6 — [Frontend] Vista pública con verificación de integridad**
 
 - **Tipo:** Frontend · **HU:** HU-02 · **Estimación:** 5 pts
 - **Descripción:** páginas `/empresas/{cuit}` y `/quejas/{id}` con verificación en el navegador.

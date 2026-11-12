@@ -100,3 +100,16 @@ si dale
 ## 7. Pull Requests
 
 _Pendiente (Entrega 2 y final)._
+
+---
+
+## Ajustes tras la revisión de LIDR (Claude Code — Sonnet)
+
+**Prompt** (resumen): se compartió el PDF de revisión de la Entrega 1 ("luz amarilla") y se pidió aplicar los ajustes al `readme.md`.
+
+Cambios aplicados sobre el diseño existente, sin tocar el alcance del MVP:
+1. **Especificación de la API cerrada.** Se agregaron `POST /api/auth/login`, `GET /api/empresas` (búsqueda), `GET /api/quejas/{id}` (detalle), `POST /api/quejas/{id}/evidencias` y `GET /api/panel/quejas` (bandeja del funcionario con triage), que faltaban frente a las pantallas e historias ya descritas.
+2. **Paso asíncrono explicitado.** Se agregó el nodo "Worker de publicación" al diagrama de arquitectura y se documentó `content_hash` como la clave con la que el listener correlaciona el evento `ComplaintFiled` (que no trae el UUID interno) con la fila en PostgreSQL.
+3. **Tickets reequilibrados.** El ticket de backend que mezclaba hash canónico, IPFS, blockchain gateway y listener se dividió en "Publicación y anclaje asíncrono" y "Listener de eventos on-chain", y se agregaron tickets propios para el **smart contract** y el **servicio de triage**, que no estaban cubiertos.
+4. **Coherencia privacidad/LLM.** HU-06 (detección de datos personales antes de publicar) ahora aclara que corre siempre con un modelo local (Ollama), nunca contra el proveedor por API usado para el triage post-publicación, porque en ese punto el texto todavía no es público.
+5. **Detalle menor corregido.** Se agregó la columna `telefono_cifrado` al modelo de datos, que la sección de seguridad ya mencionaba pero el ER no tenía.
