@@ -349,7 +349,12 @@ struct Complaint {
 
 event ComplaintFiled(uint256 indexed id, uint64 indexed companyCuit, bytes32 contentHash, string ipfsCid);
 event StatusChanged(uint256 indexed id, Status previous, Status current, bytes32 noteHash);
+
+error ComplaintAlreadyFiled(bytes32 contentHash, uint256 existingId);
+function complaintIdByHash(bytes32 contentHash) external view returns (uint256);
 ```
+
+`contentHash` es único on-chain: `fileComplaint` revierte si ya fue registrado. Como el backend correlaciona el evento con la queja por ese hash, esto impide que un reintento del relayer ancle la misma queja dos veces; el adaptador Web3j consulta `complaintIdByHash` antes de enviar y, si ya existe, devuelve la transacción original.
 
 ### **3.2. Descripción de entidades principales:**
 

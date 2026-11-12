@@ -179,3 +179,25 @@ Resultado (dominio y aplicación del módulo `complaint`, sin infraestructura to
 4. **La decisión clave del diseño, protegida por un test.** El `content_hash` se persiste *antes* de enviar la transacción, porque es la clave con la que el listener encontrará la queja. Para confirmar que el test protege esa decisión, se quitó a propósito ese guardado: el test falló, y al restaurarlo volvió a pasar.
 5. **Infraestructura ausente, diseño hexagonal aprovechado.** No hay Docker, PostgreSQL ni IPFS en la máquina. Gracias a los puertos, la lógica del worker se probó entera con dobles; los adaptadores reales quedan para el paso siguiente.
 6. **Riesgo identificado, pendiente de resolver.** Si la transacción sale pero falla el guardado de `ENVIADA`, el reintento anclaría la misma queja dos veces. La mitigación propuesta es que el contrato rechace un `contentHash` ya registrado y que el adaptador Web3j trate ese rechazo como éxito.
+
+---
+
+## Implementación — Anclaje idempotente con Web3j (Claude Code)
+
+**Prompt**
+```
+Sí, seguir
+```
+(en respuesta a la propuesta de resolver el riesgo de doble anclaje junto con el adaptador Web3j contra Anvil).
+
+Resultado:
+- **Contrato:** `contentHash` único on-chain (`ComplaintAlreadyFiled`) y la consulta `complaintIdByHash`. 2 tests nuevos de Foundry, escritos antes que el código; 10 en total.
+- **Backend:** `Web3jBlockchainGateway`, el relayer. Antes de enviar consulta si el hash ya está anclado y, si lo está, devuelve la transacción original buscando el evento `ComplaintFiled`. Estima el gas antes de enviar, así una transacción que revertiría falla sin gastar gas ni nonce.
+- **Test de integración contra Anvil real:** levanta Anvil, despliega el contrato compilado por Forge, otorga `RELAYER_ROLE` y prueba el registro, el reintento idempotente y el rechazo sin rol. 25 tests del backend en total, todos pasan.
+
+**Verificación y ajustes humanos**
+1. **Tests primero, en las dos capas.** Los tests del contrato y el de integración se escribieron antes y se vieron fallar por no compilar.
+2. **Conflicto de dependencias resuelto con criterio, no forzado.** web3j 6.1.0 trae Jackson 3 y rompió en ejecución (`NoClassDefFound` de una anotación de Jackson 2.22 que Spring Boot 3.5 no trae). En lugar de forzar versiones y convivir con dos majors de Jackson, se revisaron los POM publicados y se bajó a web3j 5.0.2, la última sobre Jackson 2, coherente con el resto del stack.
+3. **Defensa en profundidad comprobada.** Para verificar que el test protege la idempotencia se desactivó a propósito el chequeo del adaptador: el test falló, y el error mostró que el contrato rechazaba igual el duplicado con `ComplaintAlreadyFiled`. Hay dos barreras independientes contra el doble anclaje.
+4. **Claves de prueba acotadas.** El test usa las claves de desarrollo públicas que genera Anvil, que solo valen en esa cadena local; la clave real del relayer irá por variable de entorno, como fija `CLAUDE.md`.
+5. **Pendientes conocidos.** Si la transacción se mina pero revierte, la queja queda `ENVIADA` sin confirmación; se resolverá con la tabla `transaccion_blockchain` y el estado `FALLIDA`. La búsqueda del evento recorre desde el bloque 0, lo que en una testnet pública necesitará acotarse.

@@ -31,9 +31,12 @@ contract ComplaintRegistry is AccessControl {
 
     error ComplaintNotFound(uint256 id);
     error InvalidTransition(Status from, Status to);
+    error ComplaintAlreadyFiled(bytes32 contentHash, uint256 existingId);
 
     uint256 private _nextId = 1;
     mapping(uint256 => Complaint) private _complaints;
+    // El backend correlaciona eventos con quejas por contentHash: debe ser único on-chain.
+    mapping(bytes32 => uint256) private _idByContentHash;
 
     constructor(address admin) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
@@ -47,7 +50,11 @@ contract ComplaintRegistry is AccessControl {
         onlyRole(RELAYER_ROLE)
         returns (uint256 id)
     {
+        uint256 existingId = _idByContentHash[contentHash];
+        if (existingId != 0) revert ComplaintAlreadyFiled(contentHash, existingId);
+
         id = _nextId++;
+        _idByContentHash[contentHash] = id;
         _complaints[id] = Complaint({
             contentHash: contentHash,
             ipfsCid: ipfsCid,
@@ -81,6 +88,11 @@ contract ComplaintRegistry is AccessControl {
     function getComplaint(uint256 id) external view returns (Complaint memory) {
         if (_complaints[id].timestamp == 0) revert ComplaintNotFound(id);
         return _complaints[id];
+    }
+
+    /// @notice Id on-chain de la queja con ese contentHash, o 0 si no fue registrada.
+    function complaintIdByHash(bytes32 contentHash) external view returns (uint256) {
+        return _idByContentHash[contentHash];
     }
 
     function totalComplaints() external view returns (uint256) {

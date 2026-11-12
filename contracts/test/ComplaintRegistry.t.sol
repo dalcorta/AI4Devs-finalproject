@@ -42,6 +42,22 @@ contract ComplaintRegistryTest is Test {
         assertEq(uint8(complaint.status), uint8(ComplaintRegistry.Status.REGISTRADA));
     }
 
+    function test_fileComplaint_revertsOnDuplicateContentHash() public {
+        uint256 id = _fileSampleComplaint();
+
+        vm.prank(relayer);
+        vm.expectRevert(abi.encodeWithSelector(ComplaintRegistry.ComplaintAlreadyFiled.selector, CONTENT_HASH, id));
+        registry.fileComplaint(COMPANY_CUIT, CONTENT_HASH, "otroCid");
+    }
+
+    function test_complaintIdByHash_returnsIdOrZero() public {
+        assertEq(registry.complaintIdByHash(CONTENT_HASH), 0);
+
+        uint256 id = _fileSampleComplaint();
+
+        assertEq(registry.complaintIdByHash(CONTENT_HASH), id);
+    }
+
     function test_fileComplaint_revertsWithoutRelayerRole() public {
         bytes32 relayerRole = registry.RELAYER_ROLE();
         vm.prank(stranger);

@@ -18,7 +18,8 @@
 
     <properties>
         <java.version>21</java.version>
-        <web3j.version>6.1.0</web3j.version>
+        <!-- 5.0.2 es la última web3j sobre Jackson 2, como Spring Boot 3.5; desde 5.0.3 usa Jackson 3 -->
+        <web3j.version>5.0.2</web3j.version>
         <jcs.version>1.1</jcs.version>
     </properties>
 
@@ -29,7 +30,7 @@
         </dependency>
         <dependency>
             <groupId>org.web3j</groupId>
-            <artifactId>crypto</artifactId>
+            <artifactId>core</artifactId>
             <version>${web3j.version}</version>
         </dependency>
         <dependency>
