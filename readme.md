@@ -127,7 +127,7 @@ flowchart LR
     DB[(PostgreSQL)]
     IPFS[(IPFS<br/>contenido público)]
     BC[[Smart contract<br/>ComplaintRegistry]]
-    LLM[LLM<br/>Ollama / API]
+    LLM[LLM de triage<br/>Claude por API]
 
     FE -->|HTTPS| API
     API -->|guarda PENDIENTE| DB
@@ -170,7 +170,7 @@ flowchart LR
 | Worker de publicación | Spring `@Scheduled` (patrón outbox) | Toma quejas `PENDIENTE`, publica el JSON público en IPFS, calcula el `content_hash` canónico y dispara el anclaje. |
 | Servicio de anclaje | Web3j | Construye, firma y envía transacciones; guarda `tx_hash` y confirma bloques. |
 | Listener | Web3j (polling de `eth_getLogs` por lotes de bloques + checkpoint) | Detecta `ComplaintFiled` y `StatusChanged`; correlaciona el evento con la queja por `content_hash`; es idempotente y se recupera desde el último bloque procesado. |
-| Servicio de triage | Spring AI (cliente compatible con Ollama/OpenAI) | Prompt de extracción con salida JSON validada contra un esquema y contra una lista cerrada de artículos de la Ley 24.240; reintentos ante salidas inválidas. |
+| Servicio de triage | SDK oficial de Anthropic para Java (`anthropic-java`), modelo Claude, detrás del puerto `LlmClient` | Prompt de extracción con salida JSON validada contra un esquema y contra una lista cerrada de artículos de la Ley 24.240; reintentos ante salidas inválidas. |
 | Base de datos | PostgreSQL 16, Flyway | Datos de usuarios, quejas, triage, historial de estados y checkpoint del listener. |
 | Almacenamiento público | IPFS (Kubo en local, Pinata en despliegue) | Documento JSON público de cada queja y evidencias públicas. |
 | LLM (triage) | Proveedor por API en el despliegue (texto ya público, tras confirmar on-chain) | Clasifica, resume y prioriza. Solo procesa el **texto público** de la queja, nunca datos personales. |
@@ -724,7 +724,7 @@ Criterios de aceptación:
 **Ticket 5 — [Backend] Servicio de triage con LLM**
 
 - **Tipo:** Backend / IA · **HU:** HU-03 · **Estimación:** 5 pts
-- **Descripción:** cliente LLM (Spring AI) que recibe el contenido público de una queja confirmada y devuelve categoría, resumen, prioridad y artículos sugeridos.
+- **Descripción:** cliente LLM (SDK oficial de Anthropic, detrás del puerto `LlmClient`) que recibe el contenido público de una queja confirmada y devuelve categoría, resumen, prioridad y artículos sugeridos.
 - **Tareas:**
   - Prompt de extracción con el texto público de la queja y una **lista cerrada** de artículos de la Ley 24.240 permitidos.
   - Validación de la salida contra JSON Schema; reintento hasta 2 veces ante salida inválida; descarte de cualquier artículo citado que no esté en la lista cerrada (mitiga alucinaciones).

@@ -344,7 +344,7 @@ Resultado:
 
 **Verificación y ajustes humanos**
 1. **Las decisiones de diseño se preguntaron.** El readme no decía dónde se guarda el "Triage manual" ni qué proveedor usar. Se preguntó antes de escribir los tests, porque las respuestas cambiaban qué se testeaba. El readme se actualizó con lo elegido.
-2. **Una diferencia con el readme, señalada sin cambiarlo.** El readme nombra Spring AI como cliente. Se usó el SDK oficial de Anthropic: el adaptador queda detrás del puerto `LlmClient`, así que cambiarlo solo toca un archivo.
+2. **Una diferencia con el readme, señalada sin cambiarlo.** El readme nombra Spring AI como cliente. Se usó el SDK oficial de Anthropic: el adaptador queda detrás del puerto `LlmClient`, así que cambiarlo solo toca un archivo. Con el visto bueno humano, el readme se actualizó para nombrar el SDK oficial.
 3. **Cero costo en los tests, sin perder precisión.** Ningún test llama al proveedor real.
    - `AnthropicLlmClientTest` levanta un servidor HTTP local que imita la Messages API y comprueba el pedido exacto: modelo, instrucciones, contenido delimitado, esquema y fallback.
    - El resto usa un LLM simulado.
