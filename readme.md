@@ -198,7 +198,7 @@ libroabierto/
 │   ├── lib/verify.ts          # verificación de integridad en el navegador
 │   └── tests/e2e/             # Playwright
 ├── docs/                      # diagramas, ADRs
-├── docker-compose.yml
+├── compose.yaml               # PostgreSQL, Kubo y Anvil para desarrollo local
 ├── Readme.md
 └── Prompts.md
 ```

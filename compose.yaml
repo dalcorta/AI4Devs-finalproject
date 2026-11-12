@@ -1,0 +1,31 @@
+# Entorno local de desarrollo: docker compose up -d  (o podman-compose up -d)
+# Puertos ligados a 127.0.0.1: la API de Kubo (5001) permite administrar el nodo y no debe exponerse.
+services:
+  postgres:
+    image: docker.io/library/postgres:16.15-alpine
+    environment:
+      POSTGRES_DB: libroabierto
+      POSTGRES_USER: libroabierto
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-libroabierto-dev}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  ipfs:
+    image: docker.io/ipfs/kubo:v0.43.1
+    ports:
+      - "127.0.0.1:5001:5001"   # API (publicación desde el backend)
+      - "127.0.0.1:8080:8080"   # Gateway (lectura desde el frontend)
+    volumes:
+      - ipfs-data:/data/ipfs
+
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:v1.9.0
+    entrypoint: ["anvil", "--host", "0.0.0.0", "--chain-id", "31337"]
+    ports:
+      - "127.0.0.1:8545:8545"
+
+volumes:
+  postgres-data:
+  ipfs-data:

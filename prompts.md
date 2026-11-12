@@ -201,3 +201,23 @@ Resultado:
 3. **Defensa en profundidad comprobada.** Para verificar que el test protege la idempotencia se desactivó a propósito el chequeo del adaptador: el test falló, y el error mostró que el contrato rechazaba igual el duplicado con `ComplaintAlreadyFiled`. Hay dos barreras independientes contra el doble anclaje.
 4. **Claves de prueba acotadas.** El test usa las claves de desarrollo públicas que genera Anvil, que solo valen en esa cadena local; la clave real del relayer irá por variable de entorno, como fija `CLAUDE.md`.
 5. **Pendientes conocidos.** Si la transacción se mina pero revierte, la queja queda `ENVIADA` sin confirmación; se resolverá con la tabla `transaccion_blockchain` y el estado `FALLIDA`. La búsqueda del evento recorre desde el bloque 0, lo que en una testnet pública necesitará acotarse.
+
+---
+
+## Implementación — Adaptador IPFS y entorno local (Claude Code)
+
+**Prompt**
+```
+tengo podman
+```
+(en respuesta a que faltaba un motor de contenedores para IPFS y PostgreSQL).
+
+Resultado:
+- `KuboIpfsGateway`: publica el documento por la API HTTP de Kubo, con CID v1 y pin, usando el `HttpClient` de Java (sin dependencias nuevas).
+- `KuboIpfsGatewayTest` con Testcontainers sobre Podman: el contenido recuperado es idéntico byte a byte, el mismo contenido da el mismo CID (reintentos inocuos) y un nodo caído falla con excepción. 28 tests del backend en total.
+- `compose.yaml` con PostgreSQL 16.15, Kubo v0.43.1 y Anvil 1.9.0. Las versiones de las imágenes se verificaron en los registros antes de fijarlas, y los puertos quedan ligados a `127.0.0.1` porque la API de Kubo permite administrar el nodo.
+
+**Verificación y ajustes humanos**
+1. **Un verde falso detectado.** La primera corrida "pasó", pero los 3 tests figuraban como omitidos: con `disabledWithoutDocker`, Testcontainers los salteaba en silencio al no encontrar el socket. Se detectó leyendo el conteo de tests omitidos en el reporte, no el resultado global. Se quitó esa opción: ahora, sin motor de contenedores, el test falla con un error explícito (verificado).
+2. **Cambios persistentes en la máquina, decididos por el desarrollador.** El socket de la API de Podman estaba deshabilitado. Activarlo es un servicio de systemd persistente; el modo automático de Claude Code bloqueó que la IA lo hiciera por su cuenta. Para no frenar el trabajo, la IA levantó la API de Podman de forma temporal (se apaga sola) solo para correr los tests, y dejó la activación permanente documentada en `CLAUDE.md` para que la haga el desarrollador.
+3. **Límite técnico resuelto en el camino.** El primer intento de socket temporal falló porque la ruta superaba los 108 caracteres que admite un socket Unix; se usó una ruta corta.

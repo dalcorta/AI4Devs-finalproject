@@ -23,7 +23,7 @@ Libro de quejas de consumo público y verificable: el contenido público de cada
 | Carpeta | Stack | Estado |
 |---|---|---|
 | `contracts/` | Solidity 0.8.24, Foundry, OpenZeppelin 5 (vía npm) | Implementado: `ComplaintRegistry` |
-| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | En curso: hash canónico, worker de publicación, adaptador Web3j (`anchoring.infrastructure`); faltan IPFS, persistencia y wiring Spring |
+| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | En curso: hash canónico, worker de publicación, adaptadores Web3j e IPFS (Kubo); faltan persistencia y wiring Spring |
 | `frontend/` | Next.js, TypeScript, viem | Pendiente |
 | `shared/test-vectors/` | JSON | Vectores del hash canónico, usados por backend y frontend |
 
@@ -39,7 +39,17 @@ Backend:
 cd backend && mvn test
 ```
 
-`Web3jBlockchainGatewayTest` levanta un Anvil real y despliega el artefacto de `contracts/out/`: correr `forge build` antes. web3j queda en 5.0.2 a propósito (última versión sobre Jackson 2, como Spring Boot 3.5).
+Los tests de integración usan Testcontainers y **fallan** (no se omiten) si no hay motor de contenedores. Con Podman rootless, el socket de la API tiene que estar activo (`systemctl --user enable --now podman.socket`) y se pasa así:
+
+```bash
+cd backend && DOCKER_HOST=unix:///run/user/$(id -u)/podman/podman.sock mvn test
+```
+
+Al revisar resultados, mirar también el conteo de tests omitidos (`skipped`), no solo que no haya fallos.
+
+`Web3jBlockchainGatewayTest` levanta un Anvil real y despliega el artefacto de `contracts/out/`: correr `forge build` antes.
+
+Entorno local (PostgreSQL, Kubo, Anvil, con puertos solo en 127.0.0.1): `podman-compose up -d` o `docker compose up -d` desde la raíz. web3j queda en 5.0.2 a propósito (última versión sobre Jackson 2, como Spring Boot 3.5).
 
 Los valores esperados de `shared/test-vectors/canonical-hash.json` no se generan con el código que prueban: la forma canónica se contrasta con la librería `canonicalize` (npm) y el hash se calcula con `cast keccak`.
 
