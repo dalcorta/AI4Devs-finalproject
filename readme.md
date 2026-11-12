@@ -169,7 +169,7 @@ flowchart LR
 | API REST | Spring Boot 3, Java 21, Spring Security (JWT) | Casos de uso, autenticación y autorización por rol, validación. Persiste la queja como `PENDIENTE`; no publica ni ancla de forma síncrona. |
 | Worker de publicación | Spring `@Scheduled` (patrón outbox) | Toma quejas `PENDIENTE`, publica el JSON público en IPFS, calcula el `content_hash` canónico y dispara el anclaje. |
 | Servicio de anclaje | Web3j | Construye, firma y envía transacciones; guarda `tx_hash` y confirma bloques. |
-| Listener | Web3j (suscripción a logs + checkpoint de bloque) | Detecta `ComplaintFiled` y `StatusChanged`; correlaciona el evento con la queja por `content_hash`; es idempotente y se recupera desde el último bloque procesado. |
+| Listener | Web3j (polling de `eth_getLogs` por lotes de bloques + checkpoint) | Detecta `ComplaintFiled` y `StatusChanged`; correlaciona el evento con la queja por `content_hash`; es idempotente y se recupera desde el último bloque procesado. |
 | Servicio de triage | Spring AI (cliente compatible con Ollama/OpenAI) | Prompt de extracción con salida JSON validada contra un esquema y contra una lista cerrada de artículos de la Ley 24.240; reintentos ante salidas inválidas. |
 | Base de datos | PostgreSQL 16, Flyway | Datos de usuarios, quejas, triage, historial de estados y checkpoint del listener. |
 | Almacenamiento público | IPFS (Kubo en local, Pinata en despliegue) | Documento JSON público de cada queja y evidencias públicas. |
@@ -189,7 +189,7 @@ libroabierto/
 │   └── src/main/java/.../
 │       ├── complaint/         # dominio, casos de uso, adaptadores REST y JPA
 │       ├── anchoring/         # puerto BlockchainGateway + adaptador Web3j
-│       ├── listener/          # suscripción a eventos y checkpoint
+│       ├── listener/          # lectura de eventos por polling y checkpoint
 │       ├── triage/            # puerto LlmClient + prompt y validación de salida
 │       ├── identity/          # auth JWT, roles, mock de verificación de identidad
 │       └── shared/            # hashing canónico (JCS + keccak256), config
@@ -713,7 +713,7 @@ Criterios de aceptación:
 - **Tipo:** Backend · **HU:** HU-01, HU-03 · **Estimación:** 3 pts
 - **Descripción:** procesar `ComplaintFiled` y `StatusChanged`, enlazarlos con la queja por `content_hash` y disparar el triage.
 - **Tareas:**
-  - Suscripción a eventos desde `listener_checkpoint.ultimo_bloque`.
+  - Lectura periódica de eventos con `eth_getLogs` por lotes de bloques desde `listener_checkpoint.ultimo_bloque`, esperando un número configurable de confirmaciones. Se usa polling y no una suscripción por WebSocket: funciona con cualquier RPC HTTP, no pierde eventos si se corta la conexión y respeta el límite de rango de los RPC públicos.
   - Al recibir `ComplaintFiled`: buscar la queja por `content_hash` (único), actualizar `onchain_id` y `anchor_status = CONFIRMADA`.
   - Disparar el caso de uso de triage tras confirmar.
   - Idempotencia: si `onchain_id` ya está seteado, no reprocesar el evento.

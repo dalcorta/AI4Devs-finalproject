@@ -297,7 +297,7 @@ Resultado:
    - no pierde eventos si se corta una conexión WebSocket;
    - con el tope de bloques por lote respeta el límite de rango de los RPC públicos.
 
-   El costo es una latencia de unos segundos, que no importa para una queja.
+   El costo es una latencia de unos segundos, que no importa para una queja. La diferencia con el readme se señaló antes de tocarlo y, con el visto bueno humano, se actualizó el readme (arquitectura, árbol de carpetas y tareas del Ticket 4).
 2. **Un test de aceptación que no dependa del azar.** La primera versión del test de reproceso borraba el checkpoint mientras el scheduler corría. Eso es una carrera: el scheduler podía volver a escribir el checkpoint sin haber releído nada, y el test pasaría sin probar lo que dice. Se reemplazó por un listener nuevo sin checkpoint que relee todos los eventos reales de Anvil contra la base real. El test exige que haya eventos ignorados, que la fila quede idéntica y que el triage se haya disparado una sola vez.
 3. **Un fake que mentía.** Un test unitario falló: si la base falla al guardar, el siguiente intento no volvía a disparar el triage. El código estaba bien. El problema era el repositorio en memoria del test, que devolvía la misma instancia y "recordaba" una confirmación que nunca se había guardado. Se cambió para que devuelva copias, como hace PostgreSQL.
 4. **Garantías comprobadas rompiéndolas a propósito.**
