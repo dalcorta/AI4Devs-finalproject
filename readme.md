@@ -35,7 +35,7 @@ _Pendiente (Entrega final)._
 
 ### 0.5. URL o archivo comprimido del repositorio
 
-https://github.com/dalcorta/AI4Devs-finalproject/tree/feature/entrega-1-da
+https://github.com/dalcorta/AI4Devs-finalproject/tree/feature/entrega-2-da
 
 ---
 
