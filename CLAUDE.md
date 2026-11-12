@@ -23,14 +23,23 @@ Libro de quejas de consumo público y verificable: el contenido público de cada
 | Carpeta | Stack | Estado |
 |---|---|---|
 | `contracts/` | Solidity 0.8.24, Foundry, OpenZeppelin 5 (vía npm) | Implementado: `ComplaintRegistry` |
-| `backend/` | Spring Boot 3, Java 21, arquitectura hexagonal por módulo | Pendiente |
+| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | En curso: hash canónico (`shared/hashing`) |
 | `frontend/` | Next.js, TypeScript, viem | Pendiente |
+| `shared/test-vectors/` | JSON | Vectores del hash canónico, usados por backend y frontend |
 
 Contratos (Foundry está en `~/.foundry/bin`):
 
 ```bash
 cd contracts && npm install && forge build && forge test -vv
 ```
+
+Backend:
+
+```bash
+cd backend && mvn test
+```
+
+Los valores esperados de `shared/test-vectors/canonical-hash.json` no se generan con el código que prueban: la forma canónica se contrasta con la librería `canonicalize` (npm) y el hash se calcula con `cast keccak`.
 
 En el backend, el dominio no conoce Web3j ni el proveedor del LLM: se accede por puertos (`BlockchainGateway`, `LlmClient`) con adaptadores reemplazables.
 

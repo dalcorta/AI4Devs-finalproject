@@ -136,3 +136,23 @@ Resultado:
 2. **Correr los tests destapó un bug en los propios tests.** 2 de 8 fallaron: `vm.prank(stranger)` quedaba consumido por la llamada a `registry.RELAYER_ROLE()` dentro de `expectRevert`, así que la llamada protegida la hacía el contrato de test. El contrato estaba bien; el test no. Se corrigió leyendo el rol antes del `prank` y los 8 tests pasan. Esto confirmó la regla de `CLAUDE.md`: nada se da por terminado sin ejecutar la suite.
 3. **Warning revisado, no ignorado.** `forge lint` marcó el cast `uint64(block.timestamp)`; se analizó que es seguro y se silenció con un comentario que lo justifica.
 4. **Lección para los próximos tickets:** en este ticket los tests y el contrato se escribieron juntos. A partir de aquí, `CLAUDE.md` exige escribir primero los tests a partir de los criterios de aceptación y verlos fallar antes de implementar.
+
+---
+
+## Implementación — Hash canónico compartido (Claude Code)
+
+**Prompt**
+```
+Sí, seguir
+```
+(en respuesta a la propuesta de continuar con el ticket "[Backend] Publicación y anclaje asíncrono", empezando por los tests del hash canónico).
+
+Resultado:
+- `shared/test-vectors/canonical-hash.json`: 5 vectores (documento público de ejemplo, orden de claves y espacios, unicode y escapes, formato de números, arrays) con su forma canónica RFC 8785 y su `keccak256`. Los usarán los tests del backend y del frontend.
+- `backend/`: esqueleto Spring Boot 3.5 / Java 21 y `CanonicalHasher` (JCS con `java-json-canonicalization` + `keccak256` con web3j).
+- `CanonicalHasherTest`: tests parametrizados que leen los vectores compartidos, más formato `bytes32` y rechazo de JSON inválido. 12 tests pasan.
+
+**Verificación y ajustes humanos**
+1. **Vectores con oráculos independientes.** Para no generar los valores esperados con el mismo código que se prueba, la IA escribió a mano la forma canónica de cada vector, la contrastó con la librería `canonicalize` de npm (la que usará el frontend) y calculó cada hash con `cast keccak` de Foundry. Los 5 coincidieron.
+2. **Versiones consultadas, no inventadas.** Las versiones de Spring Boot, web3j y la librería JCS se leyeron de Maven Central antes de escribir el `pom.xml`; se eligió Spring Boot 3.5.16 porque el readme fija la serie 3 aunque ya existe la 4.
+3. **Tests primero, con la herramienta como límite.** Los tests se escribieron antes que `CanonicalHasher`, pero JDK y Maven no estaban instalados y su instalación pedía `sudo`, que la IA no puede usar: el desarrollador los instaló. Como no se pudo ver la fase roja antes de implementar, se hizo después a propósito: se rompió el hash (sin canonicalizar) y los 5 tests de hash fallaron; al restaurarlo, los 12 volvieron a pasar.

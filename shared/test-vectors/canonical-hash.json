@@ -1,0 +1,35 @@
+{
+  "description": "Vectores compartidos backend/frontend: input JSON -> forma canónica RFC 8785 (JCS) -> keccak256 de sus bytes UTF-8. La forma canónica se verificó contra la librería canonicalize (npm) y el hash con `cast keccak` (Foundry). Cualquier implementación debe reproducir exactamente canonical y keccak256.",
+  "vectors": [
+    {
+      "name": "queja_publica_ejemplo",
+      "input": "{\n  \"schema_version\": \"1.0\",\n  \"empresa\": { \"cuit\": \"30712345678\", \"razon_social\": \"Empresa Ficticia S.A.\" },\n  \"queja\": {\n    \"categoria\": \"telecomunicaciones\",\n    \"descripcion\": \"Corte de servicio de internet durante 15 días sin respuesta del soporte.\",\n    \"monto_reclamado_ars\": 15000,\n    \"fecha_hecho\": \"2026-10-15\"\n  },\n  \"evidencias_cids\": [\"bafyexample1\", \"bafyexample2\"],\n  \"registrada_en\": \"2026-10-18T12:00:00Z\"\n}",
+      "canonical": "{\"empresa\":{\"cuit\":\"30712345678\",\"razon_social\":\"Empresa Ficticia S.A.\"},\"evidencias_cids\":[\"bafyexample1\",\"bafyexample2\"],\"queja\":{\"categoria\":\"telecomunicaciones\",\"descripcion\":\"Corte de servicio de internet durante 15 días sin respuesta del soporte.\",\"fecha_hecho\":\"2026-10-15\",\"monto_reclamado_ars\":15000},\"registrada_en\":\"2026-10-18T12:00:00Z\",\"schema_version\":\"1.0\"}",
+      "keccak256": "0x6a6fdd46debb996c2eacc63503f54a9dc372ae83424c8edced8e64a139962d4b"
+    },
+    {
+      "name": "orden_de_claves_y_espacios",
+      "input": "{ \"b\" : 1 ,\n\t\"a\": 2, \"c\": { \"z\": true, \"y\": null, \"x\": false } }",
+      "canonical": "{\"a\":2,\"b\":1,\"c\":{\"x\":false,\"y\":null,\"z\":true}}",
+      "keccak256": "0xe1961d93c81177d802ad48cc9a43df2aaaadab08289a41e1eb37762a2b9d51e2"
+    },
+    {
+      "name": "unicode_y_escapes",
+      "input": "{\"razon_social\":\"Compañía Ñandú S.A.\",\"descripcion\":\"Línea 1\\nLínea 2 \\\"citada\\\" \\u00e1 \\/ tab\\t\"}",
+      "canonical": "{\"descripcion\":\"Línea 1\\nLínea 2 \\\"citada\\\" á / tab\\t\",\"razon_social\":\"Compañía Ñandú S.A.\"}",
+      "keccak256": "0x5c9fb38fdb9669dd70442aa5cd21e1e77aacf0962e7b0db588cfcee1aa843e6f"
+    },
+    {
+      "name": "numeros",
+      "input": "{\"entero\":15000,\"decimal\":1500.50,\"cero\":0.0,\"negativo\":-12.0,\"grande\":1e21,\"chico\":0.000001,\"muy_chico\":1e-7}",
+      "canonical": "{\"cero\":0,\"chico\":0.000001,\"decimal\":1500.5,\"entero\":15000,\"grande\":1e+21,\"muy_chico\":1e-7,\"negativo\":-12}",
+      "keccak256": "0x5091f6dfac93bd64a917868929b873d0fe722d082dbb47ab5e4e5635288b2f30"
+    },
+    {
+      "name": "arrays_conservan_orden",
+      "input": "{\"lista\":[3,1,2,{\"b\":\"x\",\"a\":\"y\"}],\"vacio\":[],\"objeto_vacio\":{}}",
+      "canonical": "{\"lista\":[3,1,2,{\"a\":\"y\",\"b\":\"x\"}],\"objeto_vacio\":{},\"vacio\":[]}",
+      "keccak256": "0x3027c1c845d6e92b0ef6760e8753afc21adb393362c97fc86f93ca7bddf5f04e"
+    }
+  ]
+}
