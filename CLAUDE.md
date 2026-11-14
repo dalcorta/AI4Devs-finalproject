@@ -15,7 +15,7 @@ Libro de quejas de consumo público y verificable: el contenido público de cada
 - Un ticket de la sección 6 del readme por vez, en orden de dependencia.
 - **Tests primero:** escribir los tests a partir de los criterios de aceptación del ticket, verlos fallar y después implementar.
 - Una tarea no está terminada hasta que su suite de tests corre y pasa; si no se pudo ejecutar, se dice explícitamente.
-- Prioridad del MVP: el recorrido registrar → anclar → verificar de punta a punta con cadena local (Anvil), IPFS local (Kubo) y LLM por API. Respuesta de la empresa, detección de PII, cifrado en reposo, Pinata, testnet pública y E2E quedan para después.
+- Prioridad del MVP: el recorrido registrar → anclar → verificar de punta a punta con cadena local (Anvil), IPFS local (Kubo) y LLM por API. Respuesta de la empresa, detección de PII, cifrado en reposo, Pinata y testnet pública quedan para después.
 - El dominio usa nombres en español (`Queja`, `Empresa`, `estado`), igual que el readme; el código técnico y las APIs de librerías quedan en inglés.
 
 ## Estructura y comandos
@@ -24,7 +24,7 @@ Libro de quejas de consumo público y verificable: el contenido público de cada
 |---|---|---|
 | `contracts/` | Solidity 0.8.24, Foundry, OpenZeppelin 5 (vía npm) | Implementado: `ComplaintRegistry` |
 | `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | Tickets de publicación y anclaje, listener on-chain y triage con LLM completos, más `POST /api/quejas` (`RegistrarQueja`), login con JWT y los endpoints públicos de lectura (HU-02). Siguiente: frontend con verificación en el navegador (Ticket 6) |
-| `frontend/` | Next.js 16, React 19, TypeScript 5.9, viem, Vitest | Ticket 6 sin E2E: búsqueda, quejas de una empresa y detalle, con verificación de integridad en el navegador (`lib/verify.ts`) |
+| `frontend/` | Next.js 16, React 19, TypeScript 5.9, viem, Vitest, Playwright | Ticket 6 completo: búsqueda, quejas de una empresa y detalle, con verificación de integridad en el navegador (`lib/verify.ts`) y E2E contra el entorno de compose |
 | `shared/test-vectors/` | JSON | Vectores del hash canónico, usados por backend y frontend |
 
 Contratos (Foundry está en `~/.foundry/bin`):
@@ -43,6 +43,12 @@ Frontend (`tests/chain.test.ts` levanta un Anvil real y despliega el artefacto d
 
 ```bash
 cd frontend && npm install && npm test && npm run typecheck && npm run build
+```
+
+E2E con Playwright (requieren los servicios de compose levantados, `forge build` y `npx playwright install chromium`; el setup recrea la base `libroabierto_e2e`, despliega un contrato nuevo, compila y levanta backend y frontend en los puertos 18081 y 13000, y los detiene al terminar):
+
+```bash
+cd frontend && npm run test:e2e
 ```
 
 Los tests de integración usan Testcontainers y **fallan** (no se omiten) si no hay motor de contenedores. Con Podman rootless, el socket de la API tiene que estar activo (`systemctl --user enable --now podman.socket`) y se pasa así:

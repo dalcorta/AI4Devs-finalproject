@@ -482,3 +482,38 @@ Resultado:
 3. **Un bug real que solo apareció al levantar el entorno.** `podman-compose` 1.3 no expandía `${POSTGRES_PASSWORD:-libroabierto-dev}` en `compose.yaml` y dejaba ese texto literal como contraseña. El backend no podía conectarse. Los tests no lo detectaban porque usan Testcontainers, no compose. Se comprobó sin imprimir la clave (largo 38, contiene `$`) y se dejó el valor de desarrollo literal.
 4. **Un test que fallaba por la razón equivocada.** El test del badge fallaba porque Testing Library no limpia el DOM entre tests si Vitest no tiene `globals`. Se agregó la limpieza en `tests/setup.ts` en lugar de tocar el componente.
 5. **Diferencia con el readme, señalada sin cambiarlo.** El criterio de aceptación del Ticket 6 pide un test E2E con Playwright, pero el `CLAUDE.md` deja los E2E para después. El caso de contenido manipulado está cubierto por los tests de `verify.ts` y por la prueba manual, pero no hay un test automático de punta a punta en el navegador.
+
+---
+
+## Implementación — Tests E2E con Playwright (Claude Code)
+
+**Prompt**
+```
+Agregá los tests E2E con Playwright
+```
+
+Resultado:
+- Los E2E corren contra el entorno de compose (PostgreSQL, Kubo y Anvil), como describe el readme para el pipeline. Cada corrida queda aislada: el global setup recrea una base propia (`libroabierto_e2e`), despliega un contrato nuevo, compila el backend y el frontend actuales y los levanta en puertos propios (18081 y 13000), para no chocar con un entorno de desarrollo abierto. El teardown los detiene.
+- Cuatro escenarios en Chromium:
+  - una queja registrada por la API aparece "Verificada", empezando por la búsqueda de la empresa;
+  - con un gateway que sirve contenido manipulado, se ve "Integridad comprometida" y el texto alterado no aparece;
+  - con un backend que informa un hash que no es el de la cadena, también;
+  - con IPFS caído se ve "No se pudo verificar", nunca "comprometida", y al reintentar se verifica.
+
+  Las fallas se provocan interceptando la red del navegador (`page.route`), que es lo que vería quien visita el sitio.
+- Si falta un requisito, el setup falla con un mensaje que dice qué hacer en lugar de quedarse esperando: servicios de compose, artefacto del contrato o puertos ocupados. Si falla a mitad de camino, detiene lo que ya había levantado.
+- Resultado: 4 de 4 en 3,4 minutos, setup incluido.
+
+**Verificación y ajustes humanos**
+1. **La memoria de la máquina mandó.** Las dos primeras corridas se cortaron: el journal mostró que el OOM killer del sistema mató la aplicación de Claude mientras el setup compilaba Next con el backend ya levantado (3,8 GB de RAM).
+   - Se reordenó el setup para compilar el frontend antes de levantar la JVM.
+   - El build de E2E no repite el chequeo de tipos, que ya hace `npm run typecheck`.
+   - El build tiene un tope de memoria propio, así una falta de memoria hace fallar la compilación y no el resto del sistema.
+
+   Después de eso, ninguna muerte por memoria.
+2. **Un error de configuración visto en la primera corrida.** El proyecto es ESM y `__dirname` no existe ahí: se usa `import.meta.dirname`.
+3. **El build de E2E no pisa el de desarrollo.** `next.config.ts` acepta `NEXT_DIST_DIR`, porque las variables `NEXT_PUBLIC_*` se incrustan al compilar y el E2E usa su propio contrato. Next agrega la carpeta `.next-e2e` al `include` del `tsconfig.json`; se dejó, porque lo vuelve a hacer en cada build.
+4. **El `CLAUDE.md` decía que los E2E quedaban para después.** Se hicieron porque los pidió el usuario, y se actualizó esa línea.
+5. **Lo que no se hizo.**
+   - No se corrió una mutación sobre los E2E: cada corrida tarda más de 3 minutos y aprieta la memoria. Lo que verifican ya tiene mutaciones en los tests unitarios de `verify.ts`.
+   - El escenario del funcionario que cambia el estado de una queja, que el readme incluye en el recorrido E2E, todavía no tiene backend.
