@@ -23,7 +23,7 @@ Libro de quejas de consumo público y verificable: el contenido público de cada
 | Carpeta | Stack | Estado |
 |---|---|---|
 | `contracts/` | Solidity 0.8.24, Foundry, OpenZeppelin 5 (vía npm) | Implementado: `ComplaintRegistry` |
-| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | Tickets de publicación y anclaje, listener on-chain y triage con LLM completos, más `POST /api/quejas` (`RegistrarQueja`) y login con JWT. Siguiente: endpoints públicos de lectura para el frontend (HU-02) |
+| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | Tickets de publicación y anclaje, listener on-chain y triage con LLM completos, más `POST /api/quejas` (`RegistrarQueja`), login con JWT y los endpoints públicos de lectura (HU-02). Siguiente: frontend con verificación en el navegador (Ticket 6) |
 | `frontend/` | Next.js, TypeScript, viem | Pendiente |
 | `shared/test-vectors/` | JSON | Vectores del hash canónico, usados por backend y frontend |
 
@@ -45,7 +45,7 @@ Los tests de integración usan Testcontainers y **fallan** (no se omiten) si no 
 cd backend && DOCKER_HOST=unix:///run/user/$(id -u)/podman/podman.sock mvn test
 ```
 
-Al revisar resultados, mirar también el conteo de tests omitidos (`skipped`), no solo que no haya fallos.
+Al revisar resultados, mirar también el conteo de tests omitidos (`skipped`), no solo que no haya fallos. Cada contexto de Spring de los tests levanta su propio PostgreSQL; `src/test/resources/spring.properties` limita la caché a 2 contextos para que la suite entre en una máquina de 4 GB.
 
 `Web3jBlockchainGatewayTest` levanta un Anvil real y despliega el artefacto de `contracts/out/`: correr `forge build` antes.
 
@@ -57,7 +57,7 @@ Los valores esperados de `shared/test-vectors/canonical-hash.json` no se generan
 
 En el backend, el dominio no conoce Web3j ni el proveedor del LLM: se accede por puertos (`BlockchainGateway`, `LlmClient`) con adaptadores reemplazables. El listener lee eventos con `eth_getLogs` por lotes desde `listener_checkpoint` (polling, no WebSocket) y es idempotente: reprocesar un evento no cambia la queja. El triage es otro worker outbox: toma las quejas `CONFIRMADA` sin triage, le manda al LLM solo `DocumentoPublico` delimitado entre `<queja>` y `</queja>`, valida la salida contra `resources/triage/salida-triage.schema.json` y filtra los artículos contra `ArticulosLey24240`. Ese esquema es la única fuente: al proveedor se le manda una versión sin las restricciones que la API no acepta, y la validación local usa el completo. Los tests del triage nunca llaman al proveedor real: usan un LLM simulado o un servidor HTTP local.
 
-Seguridad de la API: sin sesión, JWT HS256 con `sub` = id interno y `rol`; nada de email ni nombre en el token. Lo que no está permitido explícitamente en `SeguridadConfig` se niega. El denunciante de una queja sale siempre del token, nunca del cuerpo del pedido. `UsuarioEntity` no mapea nombre, DNI ni teléfono: ningún flujo actual los necesita.
+Seguridad de la API: sin sesión, JWT HS256 con `sub` = id interno y `rol`; nada de email ni nombre en el token. Lo que no está permitido explícitamente en `SeguridadConfig` se niega. El denunciante de una queja sale siempre del token, nunca del cuerpo del pedido. `UsuarioEntity` no mapea nombre, DNI ni teléfono: ningún flujo actual los necesita. La lectura pública (`JdbcConsultasPublicas`) usa SQL explícito, columna por columna, para que se vea qué sale: nunca `usuario_id`, `actor_id` ni `comentario`.
 
 Persistencia: el esquema lo define solo Flyway (`backend/src/main/resources/db/migration`); Hibernate corre en `ddl-auto: validate`. Las entidades JPA viven en `infrastructure/persistence` y no salen de ahí: el adaptador las traduce al dominio. Un cambio de esquema es una migración nueva, nunca la edición de una ya aplicada.
 

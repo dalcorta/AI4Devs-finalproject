@@ -41,6 +41,9 @@ public class SeguridadConfig {
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        // Lectura pública (HU-02): cualquiera puede consultar y verificar, sin registrarse.
+                        .requestMatchers(HttpMethod.GET, "/api/empresas", "/api/empresas/*/quejas", "/api/quejas/*")
+                        .permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/quejas").hasRole("CIUDADANO")
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(rs -> rs.jwt(jwt -> jwt.jwtAuthenticationConverter(roles)))

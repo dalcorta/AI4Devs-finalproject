@@ -1,5 +1,7 @@
 package ar.libroabierto.config;
 
+import ar.libroabierto.complaint.application.ConsultaPublica;
+import ar.libroabierto.complaint.application.ConsultasPublicas;
 import ar.libroabierto.complaint.application.Denunciantes;
 import ar.libroabierto.complaint.application.EmpresaRepository;
 import ar.libroabierto.complaint.application.RegistrarQueja;
@@ -20,5 +22,10 @@ public class RegistroConfig {
     RegistrarQueja registrarQueja(Denunciantes denunciantes, EmpresaRepository empresas, RegistroDeQuejas registro,
             Clock reloj) {
         return new RegistrarQueja(denunciantes, empresas, registro, reloj);
+    }
+
+    @Bean
+    ConsultaPublica consultaPublica(ConsultasPublicas consultas) {
+        return new ConsultaPublica(consultas);
     }
 }

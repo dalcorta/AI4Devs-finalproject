@@ -407,3 +407,38 @@ Resultado:
    - No hay límite de intentos de login.
    - No hay seed de usuarios: hoy se crean con SQL.
    - Los endpoints públicos de lectura (HU-02) siguen pendientes.
+
+---
+
+## Implementación — Endpoints públicos de lectura, HU-02 (Claude Code)
+
+**Prompt**
+```
+Sí, seguir
+```
+(y, tras una corrida interrumpida, `Inténtalo de nuevo`)
+
+Resultado:
+- Tres endpoints públicos, sin autenticación, con la forma de la especificación del readme:
+  - `GET /api/empresas?q=` busca por prefijo de CUIT (con o sin guiones) o por razón social, sin distinguir mayúsculas ni acentos;
+  - `GET /api/empresas/{cuit}/quejas?page=` lista de la más nueva a la más vieja, de a 20, con los datos de verificación (`onchainId`, `ipfsCid`, `contentHash`), y responde 404 si la empresa no existe;
+  - `GET /api/quejas/{id}` devuelve el detalle con historial de estados y evidencias, 404 si no existe y 400 si el id no es un UUID.
+- Una queja todavía sin anclar sale con `onchainId`, `ipfsCid` y `contentHash` nulos, para que el frontend la muestre como "Pendiente de anclaje".
+- La lectura usa SQL explícito (`JdbcConsultasPublicas`), así se ve columna por columna qué sale a la API pública.
+- `SeguridadConfig` abre solo esas tres rutas `GET`; todo lo demás sigue negado.
+- 12 tests de la API contra PostgreSQL real.
+
+**Verificación y ajustes humanos**
+1. **El test más importante es el de lo que no tiene que salir.** Un test arma una queja con un cambio de estado que incluye al funcionario y un comentario interno, y exige que ni el detalle ni el listado contengan el id, el email ni el nombre del denunciante, el actor ni el comentario.
+2. **Dos agujeros de la búsqueda, cerrados con su test.**
+   - Los comodines de `LIKE` que escribe el usuario se escapan: sin eso, buscar `%%` listaba todas las empresas.
+   - Una búsqueda de solo guiones (`---`) pasaba el largo mínimo pero dejaba un prefijo de CUIT vacío, que coincide con todo.
+3. **Acentos sin extensiones.** Se usó `translate` de PostgreSQL de los dos lados de la comparación en lugar de la extensión `unaccent`, que habría que crear en la base.
+4. **Tests primero, con una salvedad.** Esta vez el test y la implementación se escribieron sin correr el test en rojo en el medio. Para compensarlo, se rompieron a propósito cinco garantías y cada una hizo fallar el test que le corresponde:
+   - escapar comodines;
+   - quitar acentos;
+   - no exponer el comentario interno;
+   - negar por defecto;
+   - rechazar el prefijo vacío.
+5. **La suite se quedaba sin memoria.** La primera corrida completa terminó con código 137: la máquina tiene 3,8 GB y cada contexto de Spring de los tests levanta su propio PostgreSQL, que la caché de contextos mantiene vivo. Se limitó la caché a 2 contextos (`src/test/resources/spring.properties`), y se borraron a mano tres contenedores de esa corrida que habían quedado huérfanos.
+6. **Pendientes conocidos.** El listado no informa si hay más páginas: la especificación devuelve solo `items`.
