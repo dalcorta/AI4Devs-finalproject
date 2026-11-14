@@ -19,13 +19,18 @@ public record LibroAbiertoProperties(@Valid @NotNull Ipfs ipfs, @Valid @NotNull 
     public record Ipfs(@NotBlank String apiUrl) {
     }
 
+    /**
+     * @param relayerPrivateKey firma {@code fileComplaint} (RELAYER_ROLE)
+     * @param officerPrivateKey clave institucional del funcionario, firma {@code changeStatus} (OFFICER_ROLE). Es otra
+     *     cuenta a propósito: si se filtra la del relayer, no alcanza para cambiar estados.
+     */
     public record Blockchain(@NotBlank String rpcUrl, @NotBlank String contrato, @Positive long chainId,
-            @NotBlank String relayerPrivateKey) {
+            @NotBlank String relayerPrivateKey, @NotBlank String officerPrivateKey) {
 
         @Override
         public String toString() {
             return "Blockchain[rpcUrl=" + rpcUrl + ", contrato=" + contrato + ", chainId=" + chainId
-                    + ", relayerPrivateKey=***]";
+                    + ", relayerPrivateKey=***, officerPrivateKey=***]";
         }
     }
 

@@ -3,6 +3,8 @@ package ar.libroabierto.listener.infrastructure;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import ar.libroabierto.anchoring.infrastructure.Web3jBlockchainGateway;
+import ar.libroabierto.complaint.domain.EstadoQueja;
+import ar.libroabierto.listener.application.EventoEstadoCambiado;
 import ar.libroabierto.listener.application.EventoQuejaRegistrada;
 import ar.libroabierto.support.AnvilLocal;
 import java.util.List;
@@ -19,13 +21,14 @@ class Web3jFuenteDeEventosTest {
 
     private static AnvilLocal anvil;
     private static Web3jFuenteDeEventos fuente;
+    private static String contrato;
     private static TransactionReceipt primero;
     private static TransactionReceipt segundo;
 
     @BeforeAll
     static void anclarDosQuejas() throws Exception {
         anvil = AnvilLocal.iniciar();
-        String contrato = anvil.desplegarContrato();
+        contrato = anvil.desplegarContrato();
         var relayer = new Web3jBlockchainGateway(anvil.web3j(), AnvilLocal.RELAYER, contrato, AnvilLocal.CHAIN_ID);
         primero = anvil.esperarRecibo(relayer.registrarQueja(30712345678L, HASH_1, "bafy-uno"));
         segundo = anvil.esperarRecibo(relayer.registrarQueja(30500010912L, HASH_2, "bafy-dos"));
@@ -64,6 +67,18 @@ class Web3jFuenteDeEventosTest {
         assertThat(fuente.bloqueActual())
                 .isEqualTo(anvil.web3j().ethBlockNumber().send().getBlockNumber().longValueExact())
                 .isGreaterThanOrEqualTo(segundo.getBlockNumber().longValueExact());
+    }
+
+    @Test
+    void decodificaLosCambiosDeEstado() throws Exception {
+        var funcionario = new ar.libroabierto.anchoring.infrastructure.Web3jAnclajeDeEstados(anvil.web3j(),
+                AnvilLocal.FUNCIONARIO, contrato, AnvilLocal.CHAIN_ID);
+        var recibo = anvil.esperarRecibo(
+                funcionario.cambiarEstado(1, EstadoQueja.EN_REVISION, "0x" + "0".repeat(64)));
+
+        assertThat(fuente.estadosCambiados(0, fuente.bloqueActual())).containsExactly(new EventoEstadoCambiado(1,
+                EstadoQueja.REGISTRADA, EstadoQueja.EN_REVISION, recibo.getBlockNumber().longValueExact(),
+                recibo.getTransactionHash()));
     }
 
     @Test

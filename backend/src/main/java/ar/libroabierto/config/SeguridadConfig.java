@@ -45,6 +45,9 @@ public class SeguridadConfig {
                         .requestMatchers(HttpMethod.GET, "/api/empresas", "/api/empresas/*/quejas", "/api/quejas/*")
                         .permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/quejas").hasRole("CIUDADANO")
+                        // HU-04: la bandeja y los cambios de estado son solo del funcionario.
+                        .requestMatchers(HttpMethod.GET, "/api/panel/quejas").hasRole("FUNCIONARIO")
+                        .requestMatchers(HttpMethod.PATCH, "/api/quejas/*/estado").hasRole("FUNCIONARIO")
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(rs -> rs.jwt(jwt -> jwt.jwtAuthenticationConverter(roles)))
                 .build();

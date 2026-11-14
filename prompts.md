@@ -517,3 +517,49 @@ Resultado:
 5. **Lo que no se hizo.**
    - No se corrió una mutación sobre los E2E: cada corrida tarda más de 3 minutos y aprieta la memoria. Lo que verifican ya tiene mutaciones en los tests unitarios de `verify.ts`.
    - El escenario del funcionario que cambia el estado de una queja, que el readme incluye en el recorrido E2E, todavía no tiene backend.
+
+---
+
+## Implementación — Panel del funcionario, backend (HU-04) (Claude Code)
+
+**Prompt**
+```
+Sí, seguir con el panel del funcionario
+```
+
+Antes de escribir código, Claude Code señaló cuatro decisiones que el readme dejaba abiertas y las preguntó. El usuario eligió:
+- **Firma on-chain:** una clave institucional del funcionario, aparte de la del relayer.
+- **Spec del panel:** extendida con `triageEstado` y `articulosSugeridos`, porque la HU-03 pide mostrar el triage como sugerencia de IA.
+- **Alcance de la bandeja:** solo quejas ya ancladas.
+- **Orden:** el triage manual primero.
+
+Resultado:
+- Dominio:
+  - `EstadoQueja`, con la misma máquina de estados y el mismo orden que el enum del contrato, porque el adaptador manda el ordinal como `uint8`.
+  - `CambioDeEstado`, que no se puede construir con una transición inválida.
+- `PATCH /api/quejas/{id}/estado` responde según el caso:
+  - **202:** el cambio quedó en el historial con actor, fecha y comentario.
+  - **409:** transición no permitida, queja todavía no anclada, o cambiada en el medio por otro funcionario (`UPDATE` condicional).
+  - **404:** la queja no existe.
+  - **400:** datos inválidos.
+- El actor sale del token, nunca del cuerpo del pedido.
+- `GET /api/panel/quejas` con el orden pedido, filtro por estado y los campos nuevos.
+- Anclaje con el patrón outbox, en el mismo worker de publicación:
+  - va en orden por queja; si un cambio falla, los siguientes de esa queja esperan y los de otras quejas siguen;
+  - on-chain va solo el hash del comentario (`noteHash`), calculado y verificado con `cast keccak`, no con el código que se prueba.
+- `Web3jAnclajeDeEstados` firma con `OFFICER_PRIVATE_KEY` y es idempotente: como la máquina no tiene ciclos, si ya hay un `StatusChanged` hacia ese estado, devuelve esa transacción. La lógica de estimar gas y firmar se extrajo a `Firmante`, que comparte con el relayer.
+- El listener ahora lee `StatusChanged` y marca la transacción `CONFIRMADA` con su bloque. Si el worker se cayó antes de guardar el `tx_hash`, el evento lo completa.
+- El test de aceptación de punta a punta suma el recorrido del funcionario: cambio por la API, transacción firmada por la cuenta del funcionario (no la del relayer), confirmación por el listener y estado visible en la vista pública con su `txHash`.
+
+**Verificación y ajustes humanos**
+1. **Dos fallas en la primera corrida completa, las dos de los tests.**
+   - Un CUIT de prueba (`30999999993`) tenía mal el dígito verificador, y la API lo rechazó con 400 como corresponde. Se recalculó aparte.
+   - El test de configuración armaba el contexto a mano y le faltaba el puerto nuevo del listener.
+2. **Garantías comprobadas rompiéndolas a propósito.** Cada una de estas roturas hizo fallar su test, y al restaurar el código volvió a pasar todo:
+   - quitar el `UPDATE` condicional;
+   - quitar la búsqueda de idempotencia on-chain;
+   - quitar la espera de la queja que falló;
+   - abrir el panel a cualquier usuario autenticado;
+   - no validar la transición.
+3. **Una mutación que parecía no detectarse.** El filtro de la salida de Maven no mostraba la línea por los códigos de color, así que la idempotencia parecía no estar cubierta. Antes de concluir nada, se leyó el reporte de surefire: el test de reintento fallaba porque el contrato revertía con `InvalidTransition`.
+4. **Readme actualizado con lo decidido:** campos y orden del panel, 404 y 409 del `PATCH`, y la clave institucional del funcionario.

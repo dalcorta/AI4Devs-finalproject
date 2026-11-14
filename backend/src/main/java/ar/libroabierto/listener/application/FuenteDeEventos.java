@@ -9,4 +9,7 @@ public interface FuenteDeEventos {
 
     /** Eventos {@code ComplaintFiled} entre {@code desde} y {@code hasta}, ambos inclusive, en orden de cadena. */
     List<EventoQuejaRegistrada> quejasRegistradas(long desde, long hasta);
+
+    /** Eventos {@code StatusChanged} entre {@code desde} y {@code hasta}, ambos inclusive, en orden de cadena. */
+    List<EventoEstadoCambiado> estadosCambiados(long desde, long hasta);
 }

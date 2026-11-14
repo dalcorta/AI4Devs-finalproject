@@ -21,18 +21,20 @@ public class ProcesarEventosOnChain {
     private final QuejaRepository quejas;
     private final FuenteDeEventos cadena;
     private final CheckpointRepository checkpoint;
+    private final ConfirmacionDeCambios cambios;
     private final long bloqueInicial;
     private final int confirmaciones;
     private final int maxBloquesPorLote;
 
     public ProcesarEventosOnChain(QuejaRepository quejas, FuenteDeEventos cadena, CheckpointRepository checkpoint,
-            long bloqueInicial, int confirmaciones, int maxBloquesPorLote) {
+            ConfirmacionDeCambios cambios, long bloqueInicial, int confirmaciones, int maxBloquesPorLote) {
         if (bloqueInicial < 0 || confirmaciones < 0 || maxBloquesPorLote < 1) {
             throw new IllegalArgumentException("Configuración del listener inválida");
         }
         this.quejas = quejas;
         this.cadena = cadena;
         this.checkpoint = checkpoint;
+        this.cambios = cambios;
         this.bloqueInicial = bloqueInicial;
         this.confirmaciones = confirmaciones;
         this.maxBloquesPorLote = maxBloquesPorLote;
@@ -45,6 +47,7 @@ public class ProcesarEventosOnChain {
         long procesado = checkpoint.ultimoBloque().orElse(bloqueInicial - 1);
         int confirmadas = 0;
         int ignorados = 0;
+        int cambiosConfirmados = 0;
 
         while (procesado < ultimoSeguro) {
             long desde = procesado + 1;
@@ -56,10 +59,15 @@ public class ProcesarEventosOnChain {
                     ignorados++;
                 }
             }
+            // Después de las quejas del lote: un cambio de estado siempre es posterior al anclaje de su queja.
+            for (EventoEstadoCambiado cambio : cadena.estadosCambiados(desde, hasta)) {
+                cambios.confirmar(cambio);
+                cambiosConfirmados++;
+            }
             checkpoint.guardar(hasta);
             procesado = hasta;
         }
-        return new Resultado(confirmadas, ignorados, procesado);
+        return new Resultado(confirmadas, ignorados, cambiosConfirmados, procesado);
     }
 
     private boolean aplicar(EventoQuejaRegistrada evento) {
@@ -81,6 +89,6 @@ public class ProcesarEventosOnChain {
     /**
      * @param hastaBloque último bloque procesado (el checkpoint) al terminar la ejecución
      */
-    public record Resultado(int confirmadas, int ignorados, long hastaBloque) {
+    public record Resultado(int confirmadas, int ignorados, int cambiosConfirmados, long hastaBloque) {
     }
 }

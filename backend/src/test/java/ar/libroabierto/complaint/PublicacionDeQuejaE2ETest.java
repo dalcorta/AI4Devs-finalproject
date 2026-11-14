@@ -1,12 +1,16 @@
 package ar.libroabierto.complaint;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ar.libroabierto.PostgresTestcontainer;
 import ar.libroabierto.complaint.application.QuejaRepository;
 import ar.libroabierto.listener.application.CheckpointRepository;
+import ar.libroabierto.listener.application.ConfirmacionDeCambios;
 import ar.libroabierto.listener.application.FuenteDeEventos;
 import ar.libroabierto.listener.application.ProcesarEventosOnChain;
 import ar.libroabierto.triage.application.LlmClient;
@@ -83,6 +87,9 @@ class PublicacionDeQuejaE2ETest {
     @Autowired
     private FuenteDeEventos fuente;
 
+    @Autowired
+    private ConfirmacionDeCambios confirmaciones;
+
     @DynamicPropertySource
     static void infraestructura(DynamicPropertyRegistry props) throws Exception {
         anvil = AnvilLocal.iniciar();
@@ -94,6 +101,8 @@ class PublicacionDeQuejaE2ETest {
         props.add("libroabierto.blockchain.chain-id", () -> AnvilLocal.CHAIN_ID);
         props.add("libroabierto.blockchain.relayer-private-key",
                 () -> AnvilLocal.RELAYER.getEcKeyPair().getPrivateKey().toString(16));
+        props.add("libroabierto.blockchain.officer-private-key",
+                () -> AnvilLocal.FUNCIONARIO.getEcKeyPair().getPrivateKey().toString(16));
         props.add("libroabierto.worker.intervalo", () -> "PT0.5S");
         props.add("libroabierto.listener.intervalo", () -> "PT0.5S");
         props.add("libroabierto.triage.intervalo", () -> "PT0.5S");
@@ -164,7 +173,7 @@ class PublicacionDeQuejaE2ETest {
             }
         };
         ProcesarEventosOnChain.Resultado replay = new ProcesarEventosOnChain(
-                quejas, fuente, sinCheckpoint, 0, 0, 1000).ejecutar();
+                quejas, fuente, sinCheckpoint, confirmaciones, 0, 0, 1000).ejecutar();
 
         assertThat(replay.confirmadas()).isZero();
         assertThat(replay.ignorados()).isPositive();
@@ -178,6 +187,54 @@ class PublicacionDeQuejaE2ETest {
     }
 
     /** El recorrido empieza como en producción: un ciudadano verificado inicia sesión y registra la queja por la API. */
+    @Test
+    void unFuncionarioCambiaElEstadoYQuedaAncladoYConfirmadoOnChain() throws Exception {
+        UUID queja = quejaPorApi("30999999995", "Producto entregado con defectos y sin respuesta del vendedor.");
+        esperarEstado(queja, "CONFIRMADA");
+        String token = funcionarioConToken();
+
+        mvc.perform(patch("/api/quejas/" + queja + "/estado").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"estado\": \"EN_REVISION\", \"comentario\": \"Se pidió documentación.\"}"))
+                .andExpect(status().isAccepted());
+
+        // El worker lo ancla con la clave del funcionario y el listener lo confirma desde el evento StatusChanged real.
+        Instant limite = Instant.now().plus(Duration.ofSeconds(30));
+        Map<String, Object> transaccion = Map.of();
+        while (Instant.now().isBefore(limite)) {
+            var filas = jdbc.queryForList("""
+                    SELECT t.tx_hash, t.estado, t.block_number FROM transaccion_blockchain t
+                    JOIN cambio_estado c ON c.tx_hash = t.tx_hash
+                    WHERE c.queja_id = ? AND t.tipo = 'CAMBIO_ESTADO'""", queja);
+            if (!filas.isEmpty() && "CONFIRMADA".equals(filas.get(0).get("estado"))) {
+                transaccion = filas.get(0);
+                break;
+            }
+            Thread.sleep(200);
+        }
+        assertThat(transaccion).as("El cambio de estado no quedó confirmado on-chain a tiempo")
+                .containsEntry("estado", "CONFIRMADA");
+        var recibo = anvil.esperarRecibo((String) transaccion.get("tx_hash"));
+        assertThat(recibo.isStatusOK()).isTrue();
+        assertThat(recibo.getFrom()).isEqualToIgnoringCase(AnvilLocal.FUNCIONARIO.getAddress());
+
+        mvc.perform(get("/api/quejas/" + queja))
+                .andExpect(jsonPath("$.estado").value("EN_REVISION"))
+                .andExpect(jsonPath("$.historialEstados[0].txHash").value((String) transaccion.get("tx_hash")));
+    }
+
+    private String funcionarioConToken() throws Exception {
+        String email = "funcionaria-" + UUID.randomUUID() + "@example.test";
+        jdbc.update("""
+                INSERT INTO usuario (id, email, password_hash, rol, nombre_completo, identidad_verificada)
+                VALUES (?, ?, ?, 'FUNCIONARIO', 'Funcionaria Ficticia', true)""",
+                UUID.randomUUID(), email, new BCryptPasswordEncoder().encode("clave-e2e"));
+        String login = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\": \"" + email + "\", \"password\": \"clave-e2e\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        return new ObjectMapper().readTree(login).get("token").asText();
+    }
+
     private UUID quejaPorApi(String cuit, String descripcion) throws Exception {
         String email = "denunciante-" + UUID.randomUUID() + "@example.test";
         jdbc.update("""

@@ -23,6 +23,8 @@ libroabierto:
     contrato: ${CONTRACT_ADDRESS:}
     # Sin valor por defecto a propósito: la clave del relayer nunca vive en el repositorio.
     relayer-private-key: ${RELAYER_PRIVATE_KEY:}
+    # Clave institucional del funcionario (OFFICER_ROLE), distinta de la del relayer; tampoco tiene valor por defecto.
+    officer-private-key: ${OFFICER_PRIVATE_KEY:}
   worker:
     habilitado: ${WORKER_HABILITADO:true}
     intervalo: ${WORKER_INTERVALO:PT10S}

@@ -25,9 +25,10 @@ class ListenerScheduler {
     @Scheduled(fixedDelayString = "${libroabierto.listener.intervalo}")
     void procesarEventos() {
         ProcesarEventosOnChain.Resultado resultado = listener.ejecutar();
-        if (resultado.confirmadas() > 0 || resultado.ignorados() > 0) {
-            log.info("Listener: {} quejas confirmadas, {} eventos ignorados, checkpoint en el bloque {}",
-                    resultado.confirmadas(), resultado.ignorados(), resultado.hastaBloque());
+        if (resultado.confirmadas() > 0 || resultado.ignorados() > 0 || resultado.cambiosConfirmados() > 0) {
+            log.info("Listener: {} quejas confirmadas, {} eventos ignorados, {} cambios de estado confirmados, "
+                    + "checkpoint en el bloque {}", resultado.confirmadas(), resultado.ignorados(),
+                    resultado.cambiosConfirmados(), resultado.hastaBloque());
         }
     }
 }

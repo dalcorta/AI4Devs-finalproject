@@ -563,7 +563,9 @@ paths:
 
   /api/panel/quejas:
     get:
-      summary: Bandeja del funcionario, ordenada por prioridad de triage
+      summary: >-
+        Bandeja del funcionario (solo quejas ancladas on-chain): primero las de triage manual, después por
+        prioridad ALTA, MEDIA, BAJA, después las que esperan triage; dentro de cada grupo, la más antigua primero
       security: [{ bearerAuth: [] }]
       parameters:
         - { name: estado, in: query, schema: { type: string } }
@@ -583,9 +585,14 @@ paths:
                       properties:
                         id: { type: string, format: uuid }
                         empresa: { type: string }
-                        categoriaSugerida: { type: string }
-                        resumen: { type: string }
+                        triageEstado: { type: string, enum: [SUGERIDO, MANUAL, PENDIENTE] }
+                        categoriaSugerida: { type: string, description: Sugerencia generada por IA }
+                        resumen: { type: string, description: Sugerencia generada por IA }
                         prioridad: { type: string, enum: [BAJA, MEDIA, ALTA] }
+                        articulosSugeridos:
+                          type: array
+                          description: Artículos de la Ley 24.240 sugeridos por IA, de la lista cerrada
+                          items: { type: string }
                         estado: { type: string }
                         createdAt: { type: string, format: date-time }
         '403': { description: El usuario no tiene rol FUNCIONARIO }
@@ -609,7 +616,8 @@ paths:
       responses:
         '202': { description: Cambio aceptado; anclaje on-chain en curso }
         '403': { description: El usuario no tiene rol FUNCIONARIO }
-        '409': { description: Transición de estado no permitida }
+        '404': { description: Queja no encontrada }
+        '409': { description: Transición de estado no permitida, o queja todavía no anclada on-chain }
 
 components:
   securitySchemes:
@@ -669,6 +677,7 @@ Criterios de aceptación:
 - Solo se permiten las transiciones de la máquina de estados; una transición inválida devuelve error.
 - Cada cambio queda en el historial con actor, fecha, comentario y `tx_hash`.
 - El nuevo estado se ve en la vista pública con su enlace a la transacción.
+- El cambio se firma on-chain con una **clave institucional del funcionario** (`OFFICER_ROLE`), distinta de la del relayer: el backend autentica al funcionario con su JWT y guarda quién hizo el cambio; la cadena registra que lo hizo el organismo. On-chain va solo el hash del comentario (`noteHash`); el texto es interno.
 
 **Should-have**
 - **HU-05 — Respuesta de la empresa:** un usuario con rol EMPRESA responde a una queja contra su CUIT; la respuesta se publica en IPFS y se ancla.

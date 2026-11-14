@@ -1,6 +1,8 @@
 package ar.libroabierto.listener.infrastructure;
 
 import ar.libroabierto.anchoring.infrastructure.ComplaintRegistryAbi;
+import ar.libroabierto.complaint.domain.EstadoQueja;
+import ar.libroabierto.listener.application.EventoEstadoCambiado;
 import ar.libroabierto.listener.application.EventoQuejaRegistrada;
 import ar.libroabierto.listener.application.FuenteDeEventos;
 import java.io.IOException;
@@ -56,6 +58,34 @@ public class Web3jFuenteDeEventos implements FuenteDeEventos {
         } catch (IOException e) {
             throw new IllegalStateException("Error de comunicación con el nodo", e);
         }
+    }
+
+    @Override
+    public List<EventoEstadoCambiado> estadosCambiados(long desde, long hasta) {
+        EthFilter filtro = new EthFilter(
+                DefaultBlockParameter.valueOf(BigInteger.valueOf(desde)),
+                DefaultBlockParameter.valueOf(BigInteger.valueOf(hasta)),
+                contrato)
+                .addSingleTopic(ComplaintRegistryAbi.STATUS_CHANGED_TOPIC);
+        try {
+            EthLog logs = web3j.ethGetLogs(filtro).send();
+            exigirSinError(logs, "Falló la lectura de eventos StatusChanged");
+            return logs.getLogs().stream().map(resultado -> decodificarCambio((Log) resultado.get())).toList();
+        } catch (IOException e) {
+            throw new IllegalStateException("Error de comunicación con el nodo", e);
+        }
+    }
+
+    @SuppressWarnings("rawtypes")
+    private static EventoEstadoCambiado decodificarCambio(Log log) {
+        var valores = Contract.staticExtractEventParameters(ComplaintRegistryAbi.STATUS_CHANGED, log);
+        List<Type> datos = valores.getNonIndexedValues();
+        return new EventoEstadoCambiado(
+                ((BigInteger) valores.getIndexedValues().get(0).getValue()).longValueExact(),
+                EstadoQueja.values()[((BigInteger) datos.get(0).getValue()).intValueExact()],
+                EstadoQueja.values()[((BigInteger) datos.get(1).getValue()).intValueExact()],
+                log.getBlockNumber().longValueExact(),
+                log.getTransactionHash());
     }
 
     @SuppressWarnings("rawtypes")

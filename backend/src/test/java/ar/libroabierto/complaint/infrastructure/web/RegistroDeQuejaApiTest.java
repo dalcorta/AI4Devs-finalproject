@@ -35,6 +35,7 @@ import org.springframework.test.web.servlet.MockMvc;
         "libroabierto.triage.habilitado=false",
         "libroabierto.blockchain.contrato=0x5FbDB2315678afecb367f032d93F642f64180aa3",
         "libroabierto.blockchain.relayer-private-key=59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
+        "libroabierto.blockchain.officer-private-key=7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
         "libroabierto.auth.jwt-secret=" + RegistroDeQuejaApiTest.SECRETO})
 @AutoConfigureMockMvc
 @Import(PostgresTestcontainer.class)

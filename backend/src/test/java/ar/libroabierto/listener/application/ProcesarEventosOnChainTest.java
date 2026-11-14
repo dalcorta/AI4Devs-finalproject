@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import ar.libroabierto.complaint.application.QuejaRepository;
 import ar.libroabierto.complaint.domain.AnchorStatus;
 import ar.libroabierto.complaint.domain.Empresa;
+import ar.libroabierto.complaint.domain.EstadoQueja;
 import ar.libroabierto.complaint.domain.Queja;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -29,12 +30,14 @@ class ProcesarEventosOnChainTest {
     private RepositorioEnMemoria repositorio;
     private CadenaFalsa cadena;
     private CheckpointEnMemoria checkpoint;
+    private ConfirmacionesEnMemoria confirmados;
 
     @BeforeEach
     void setUp() {
         repositorio = new RepositorioEnMemoria();
         cadena = new CadenaFalsa();
         checkpoint = new CheckpointEnMemoria();
+        confirmados = new ConfirmacionesEnMemoria();
     }
 
     @Test
@@ -150,8 +153,24 @@ class ProcesarEventosOnChainTest {
         assertThat(repositorio.actual(a.id()).anchorStatus()).isEqualTo(AnchorStatus.CONFIRMADA);
     }
 
+    @Test
+    void confirmaLosCambiosDeEstadoDelLoteAntesDeAvanzarElCheckpoint() {
+        EventoEstadoCambiado cambio = new EventoEstadoCambiado(3, EstadoQueja.REGISTRADA, EstadoQueja.EN_REVISION, 4,
+                String.format("0x%064x", 99));
+        cadena.emitir(cambio);
+        cadena.emitir(new EventoEstadoCambiado(3, EstadoQueja.EN_REVISION, EstadoQueja.DERIVADA, 9,
+                String.format("0x%064x", 100)));
+        cadena.bloqueActual = 5;
+
+        ProcesarEventosOnChain.Resultado resultado = listener(0, 0, 100).ejecutar();
+
+        assertThat(confirmados.confirmados).containsExactly(cambio);
+        assertThat(resultado.cambiosConfirmados()).isEqualTo(1);
+        assertThat(checkpoint.valor).isEqualTo(OptionalLong.of(5));
+    }
+
     private ProcesarEventosOnChain listener(long bloqueInicial, int confirmaciones, int maxBloquesPorLote) {
-        return new ProcesarEventosOnChain(repositorio, cadena, checkpoint, bloqueInicial, confirmaciones,
+        return new ProcesarEventosOnChain(repositorio, cadena, checkpoint, confirmados, bloqueInicial, confirmaciones,
                 maxBloquesPorLote);
     }
 
@@ -213,11 +232,21 @@ class ProcesarEventosOnChainTest {
 
     static class CadenaFalsa implements FuenteDeEventos {
         private final List<EventoQuejaRegistrada> eventos = new ArrayList<>();
+        private final List<EventoEstadoCambiado> cambios = new ArrayList<>();
         final List<Rango> consultas = new ArrayList<>();
         long bloqueActual;
 
         void emitir(EventoQuejaRegistrada evento) {
             eventos.add(evento);
+        }
+
+        void emitir(EventoEstadoCambiado evento) {
+            cambios.add(evento);
+        }
+
+        @Override
+        public List<EventoEstadoCambiado> estadosCambiados(long desde, long hasta) {
+            return cambios.stream().filter(e -> e.bloque() >= desde && e.bloque() <= hasta).toList();
         }
 
         @Override
@@ -229,6 +258,15 @@ class ProcesarEventosOnChainTest {
         public List<EventoQuejaRegistrada> quejasRegistradas(long desde, long hasta) {
             consultas.add(new Rango(desde, hasta));
             return eventos.stream().filter(e -> e.bloque() >= desde && e.bloque() <= hasta).toList();
+        }
+    }
+
+    static class ConfirmacionesEnMemoria implements ConfirmacionDeCambios {
+        final List<EventoEstadoCambiado> confirmados = new ArrayList<>();
+
+        @Override
+        public void confirmar(EventoEstadoCambiado evento) {
+            confirmados.add(evento);
         }
     }
 

@@ -44,6 +44,8 @@ public final class AnvilLocal implements AutoCloseable {
             Credentials.create("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80");
     public static final Credentials RELAYER =
             Credentials.create("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
+    public static final Credentials FUNCIONARIO =
+            Credentials.create("0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6");
     public static final Credentials SIN_ROL =
             Credentials.create("0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdd4c4a3");
 
@@ -85,7 +87,10 @@ public final class AnvilLocal implements AutoCloseable {
         return web3j;
     }
 
-    /** Despliega un ComplaintRegistry nuevo con ADMIN como administrador y RELAYER con RELAYER_ROLE. */
+    /**
+     * Despliega un ComplaintRegistry nuevo con ADMIN como administrador, RELAYER con RELAYER_ROLE y FUNCIONARIO con
+     * OFFICER_ROLE.
+     */
     public String desplegarContrato() throws Exception {
         String bytecode = new ObjectMapper().readTree(ARTEFACTO.toFile()).get("bytecode").get("object").asText();
         String constructor = FunctionEncoder.encodeConstructor(List.of(new Address(ADMIN.getAddress())));
@@ -94,6 +99,9 @@ public final class AnvilLocal implements AutoCloseable {
         byte[] relayerRole = Hash.sha3("RELAYER_ROLE".getBytes());
         enviar(ADMIN, contrato, FunctionEncoder.encode(new Function(
                 "grantRole", List.of(new Bytes32(relayerRole), new Address(RELAYER.getAddress())), List.of())));
+        byte[] officerRole = Hash.sha3("OFFICER_ROLE".getBytes());
+        enviar(ADMIN, contrato, FunctionEncoder.encode(new Function(
+                "grantRole", List.of(new Bytes32(officerRole), new Address(FUNCIONARIO.getAddress())), List.of())));
         return contrato;
     }
 
