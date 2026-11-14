@@ -442,3 +442,43 @@ Resultado:
    - rechazar el prefijo vacío.
 5. **La suite se quedaba sin memoria.** La primera corrida completa terminó con código 137: la máquina tiene 3,8 GB y cada contexto de Spring de los tests levanta su propio PostgreSQL, que la caché de contextos mantiene vivo. Se limitó la caché a 2 contextos (`src/test/resources/spring.properties`), y se borraron a mano tres contenedores de esa corrida que habían quedado huérfanos.
 6. **Pendientes conocidos.** El listado no informa si hay más páginas: la especificación devuelve solo `items`.
+
+---
+
+## Implementación — Frontend con verificación en el navegador, Ticket 6 (Claude Code)
+
+**Prompt**
+```
+Sí, seguir
+```
+
+Resultado:
+- Proyecto Next.js 16 con React 19, TypeScript 5.9, viem y Vitest, armado a mano con versiones exactas.
+- Tres páginas, con estados de carga y error:
+  - `/` busca empresas;
+  - `/empresas/[cuit]` lista las quejas con su badge;
+  - `/quejas/[id]` muestra el detalle, los datos de verificación y el historial, con enlace al explorador si hay uno configurado.
+- `lib/verify.ts` no confía en el backend: de la API toma solo el `onchainId`, lee el CID y el hash del contrato, baja el contenido de IPFS con ese CID y recalcula el hash canónico. Distingue cuatro resultados:
+  - `PENDIENTE`;
+  - `VERIFICADA`;
+  - `COMPROMETIDA`, cuando el contenido no coincide, la cadena no tiene esa queja, el backend informa otro CID u otro hash, o el contenido no es JSON;
+  - `NO_VERIFICABLE`, cuando IPFS o la cadena no responden. Un corte de red no se muestra como alteración.
+- El contenido de una queja se muestra solo si quedó verificada: una versión manipulada nunca aparece como auténtica.
+- `lib/canonical.ts` reproduce el hash del backend (RFC 8785 + keccak256) y se prueba con los mismos vectores de `shared/test-vectors`.
+- 32 tests: vectores compartidos, todos los caminos de `verify.ts`, el badge, y el ABI escrito a mano contrastado con el contrato compilado sobre un Anvil real. Typecheck y build de producción sin errores.
+- El backend pasa al puerto 8081 (`SERVER_PORT`): el 8080 es del gateway de Kubo que lee el frontend.
+
+**Verificación y ajustes humanos**
+1. **El recorrido completo, probado en un navegador real.** Los tests no cubren lo que más puede fallar en producción: que el navegador llegue directo al gateway de IPFS y a la cadena (CORS) con el contrato real. Se hizo el recorrido entero:
+   - levantar compose;
+   - desplegar el contrato;
+   - arrancar el backend;
+   - crear una ciudadana de prueba;
+   - registrar una queja por la API, que quedó confirmada on-chain en segundos;
+   - abrirla en el navegador integrado: "Verificada".
+
+   Las peticiones de red confirmaron que el contrato se leyó en Anvil y el contenido en el gateway, sin pasar por el backend.
+2. **El criterio del ticket, probado a mano.** Para simular un gateway malicioso se interceptó `fetch` en la página, alterando "15 días" por "2 días". La queja pasó a "Integridad comprometida" y el texto alterado no apareció en pantalla. También se revisó a 375 px de ancho, sin desborde horizontal.
+3. **Un bug real que solo apareció al levantar el entorno.** `podman-compose` 1.3 no expandía `${POSTGRES_PASSWORD:-libroabierto-dev}` en `compose.yaml` y dejaba ese texto literal como contraseña. El backend no podía conectarse. Los tests no lo detectaban porque usan Testcontainers, no compose. Se comprobó sin imprimir la clave (largo 38, contiene `$`) y se dejó el valor de desarrollo literal.
+4. **Un test que fallaba por la razón equivocada.** El test del badge fallaba porque Testing Library no limpia el DOM entre tests si Vitest no tiene `globals`. Se agregó la limpieza en `tests/setup.ts` en lugar de tocar el componente.
+5. **Diferencia con el readme, señalada sin cambiarlo.** El criterio de aceptación del Ticket 6 pide un test E2E con Playwright, pero el `CLAUDE.md` deja los E2E para después. El caso de contenido manipulado está cubierto por los tests de `verify.ts` y por la prueba manual, pero no hay un test automático de punta a punta en el navegador.

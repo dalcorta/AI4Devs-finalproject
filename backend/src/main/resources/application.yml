@@ -1,3 +1,6 @@
+server:
+  # 8080 lo usa el gateway de Kubo (compose.yaml), que lee el frontend.
+  port: ${SERVER_PORT:8081}
 spring:
   application:
     name: libroabierto-backend

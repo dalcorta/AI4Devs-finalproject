@@ -6,7 +6,9 @@ services:
     environment:
       POSTGRES_DB: libroabierto
       POSTGRES_USER: libroabierto
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-libroabierto-dev}
+      # Clave solo de desarrollo, la misma que el valor por defecto de DB_PASSWORD en application.yml. Va literal:
+      # podman-compose 1.3 no expande ${VAR:-defecto} acá y dejaba ese texto como contraseña.
+      POSTGRES_PASSWORD: libroabierto-dev
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
