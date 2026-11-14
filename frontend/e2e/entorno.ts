@@ -22,10 +22,12 @@ export const BASE_E2E = "libroabierto_e2e";
 
 export const ARCHIVO_ESTADO = join(import.meta.dirname, ".estado.json");
 
+export type Credenciales = { email: string; clave: string };
+
 export type Estado = {
   contrato: string;
-  email: string;
-  clave: string;
+  ciudadana: Credenciales;
+  funcionaria: Credenciales;
   pids: number[];
 };
 

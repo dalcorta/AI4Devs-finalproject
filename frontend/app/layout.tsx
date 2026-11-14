@@ -18,6 +18,9 @@ export default function Layout({ children }: { children: ReactNode }) {
               LibroAbierto
             </Link>
             <span>Quejas de consumo públicas y verificables</span>
+            <Link href="/panel" className="ingresar">
+              Organismo
+            </Link>
           </div>
         </header>
         <main className="contenedor">{children}</main>

@@ -563,3 +563,31 @@ Resultado:
    - no validar la transición.
 3. **Una mutación que parecía no detectarse.** El filtro de la salida de Maven no mostraba la línea por los códigos de color, así que la idempotencia parecía no estar cubierta. Antes de concluir nada, se leyó el reporte de surefire: el test de reintento fallaba porque el contrato revertía con `InvalidTransition`.
 4. **Readme actualizado con lo decidido:** campos y orden del panel, 404 y 409 del `PATCH`, y la clave institucional del funcionario.
+
+---
+
+## Implementación — Panel del funcionario, frontend y E2E (HU-04) (Claude Code)
+
+**Prompt**
+```
+Seguí con el panel del funcionario
+```
+
+Resultado:
+- `/login`: solo deja entrar a funcionarios. Una ciudadana ve un mensaje y se queda en la página.
+- `/panel`: bandeja con filtro por estado y paginación. Cada queja muestra:
+  - el estado de su triage: "Sugerencia de IA", "Triage manual" o "Triage pendiente";
+  - la prioridad, la categoría y el resumen sugeridos, y los artículos de la Ley 24.240;
+  - el estado actual de la queja.
+- En cada fila se puede cambiar el estado, eligiendo entre los pasos posibles de la máquina de estados, con un comentario interno opcional. Un 409 muestra el motivo que explica el backend. Un 401 o 403 cierra la sesión y lleva a ingresar.
+- El token queda en `sessionStorage`, no en `localStorage`: la sesión termina al cerrar la pestaña.
+- `lib/estados.ts` replica la máquina de estados del contrato solo para ofrecer opciones; la validan el backend y el contrato.
+- E2E: el setup le da `OFFICER_ROLE` a la cuenta del funcionario y crea una funcionaria de prueba. Tres escenarios nuevos:
+  - sin sesión, el panel lleva a ingresar;
+  - una ciudadana no entra;
+  - la funcionaria cambia el estado desde la interfaz y, cuando el worker lo ancla, la vista pública muestra el cambio con su hash de transacción y sin el comentario interno.
+- 39 tests unitarios y 7 E2E pasan.
+
+**Verificación y ajustes humanos**
+1. **Un falso positivo evitado en el propio test.** Antes del cambio, el select de la fila ya ofrece la opción "En revisión", así que buscar ese texto suelto habría dado el test por bueno sin que nada cambiara. Se acotó la comprobación al badge de estado.
+2. **Datos compartidos entre specs.** El spec del panel corre primero y registra otra queja contra la misma empresa. El test de verificación, que daba por hecho una sola queja en la lista, encontró dos badges y falló. Se acotó a la fila de su propia queja en lugar de borrar datos entre specs.

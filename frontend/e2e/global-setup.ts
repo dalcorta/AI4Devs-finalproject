@@ -11,6 +11,7 @@ import {
   ARCHIVO_ESTADO,
   BACKEND_URL,
   BASE_E2E,
+  type Credenciales,
   type Estado,
   FRONTEND_URL,
   IPFS_API_URL,
@@ -31,6 +32,8 @@ import {
 const ADMIN = privateKeyToAccount("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80");
 const RELAYER_KEY = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 const RELAYER = privateKeyToAccount(`0x${RELAYER_KEY}`);
+const OFFICER_KEY = "7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6";
+const FUNCIONARIO = privateKeyToAccount(`0x${OFFICER_KEY}`);
 
 const RAIZ = join(import.meta.dirname, "..", "..");
 const FRONTEND = join(RAIZ, "frontend");
@@ -119,26 +122,32 @@ async function desplegarContrato(): Promise<{ contrato: Address; bloque: bigint 
     hash: await admin.deployContract({ abi, bytecode: bytecode.object, args: [ADMIN.address] }),
   });
   const contrato = recibo.contractAddress as Address;
-  await publico.waitForTransactionReceipt({
-    hash: await admin.writeContract({
-      address: contrato,
-      abi,
-      functionName: "grantRole",
-      args: [keccak256(toBytes("RELAYER_ROLE")), RELAYER.address],
-    }),
-  });
+  // Cuentas separadas: el relayer solo registra quejas y la clave institucional del funcionario solo cambia estados.
+  for (const [rol, cuenta] of [
+    ["RELAYER_ROLE", RELAYER.address],
+    ["OFFICER_ROLE", FUNCIONARIO.address],
+  ] as const) {
+    await publico.waitForTransactionReceipt({
+      hash: await admin.writeContract({
+        address: contrato,
+        abi,
+        functionName: "grantRole",
+        args: [keccak256(toBytes(rol)), cuenta],
+      }),
+    });
+  }
   return { contrato, bloque: recibo.blockNumber };
 }
 
-async function crearCiudadana(): Promise<{ email: string; clave: string }> {
-  const email = `ciudadana-e2e-${Date.now()}@example.test`;
+async function crearUsuario(rol: "CIUDADANO" | "FUNCIONARIO"): Promise<Credenciales> {
+  const email = `${rol.toLowerCase()}-e2e-${Date.now()}@example.test`;
   const clave = randomBytes(18).toString("base64url");
   const db = new pg.Client({ ...POSTGRES, database: BASE_E2E });
   await db.connect();
   await db.query(
     `INSERT INTO usuario (id, email, password_hash, rol, nombre_completo, identidad_verificada)
-     VALUES (gen_random_uuid(), $1, $2, 'CIUDADANO', 'Persona Ficticia E2E', true)`,
-    [email, await bcrypt.hash(clave, 10)],
+     VALUES (gen_random_uuid(), $1, $2, $3, 'Persona Ficticia E2E', true)`,
+    [email, await bcrypt.hash(clave, 10), rol],
   );
   await db.end();
   return { email, clave };
@@ -194,6 +203,7 @@ async function armarEntorno() {
     RPC_URL,
     CONTRACT_ADDRESS: contrato,
     RELAYER_PRIVATE_KEY: RELAYER_KEY,
+    OFFICER_PRIVATE_KEY: OFFICER_KEY,
     JWT_SECRET: randomBytes(48).toString("base64"),
     TRIAGE_HABILITADO: "false",
     WORKER_INTERVALO: "PT1S",
@@ -212,7 +222,11 @@ async function armarEntorno() {
   );
   await esperar("Frontend de E2E", () => responde(`${FRONTEND_URL}/`), 60, frontend);
 
-  const ciudadana = await crearCiudadana();
-  const estado: Estado = { contrato, ...ciudadana, pids: [backend.pid!, frontend.pid!] };
+  const estado: Estado = {
+    contrato,
+    ciudadana: await crearUsuario("CIUDADANO"),
+    funcionaria: await crearUsuario("FUNCIONARIO"),
+    pids: [backend.pid!, frontend.pid!],
+  };
   writeFileSync(ARCHIVO_ESTADO, JSON.stringify(estado, null, 2));
 }

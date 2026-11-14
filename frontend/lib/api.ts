@@ -26,6 +26,49 @@ export type QuejaDetalle = {
 
 export class NoEncontrado extends Error {}
 
+/** Token vencido, inválido o de un rol sin permiso: hay que volver a iniciar sesión. */
+export class NoAutorizado extends Error {}
+
+/** Un rechazo con motivo que el backend explica (409, 400, credenciales inválidas). */
+export class ErrorDeApi extends Error {}
+
+export type Sesion = { token: string; rol: "CIUDADANO" | "FUNCIONARIO" | "EMPRESA" };
+
+export type ItemDeBandeja = {
+  id: string;
+  empresa: string;
+  triageEstado: "SUGERIDO" | "MANUAL" | "PENDIENTE";
+  categoriaSugerida: string | null;
+  resumen: string | null;
+  prioridad: "BAJA" | "MEDIA" | "ALTA" | null;
+  articulosSugeridos: string[];
+  estado: string;
+  createdAt: string;
+};
+
+async function motivo(respuesta: Response): Promise<string> {
+  try {
+    const cuerpo = (await respuesta.json()) as { mensaje?: string };
+    return cuerpo.mensaje ?? `La API respondió ${respuesta.status}`;
+  } catch {
+    return `La API respondió ${respuesta.status}`;
+  }
+}
+
+async function conSesion(ruta: string, token: string, init: RequestInit = {}): Promise<Response> {
+  const respuesta = await fetch(ruta, {
+    ...init,
+    headers: { Authorization: `Bearer ${token}`, ...(init.headers as Record<string, string> | undefined) },
+  });
+  if (respuesta.status === 401 || respuesta.status === 403) {
+    throw new NoAutorizado(ruta);
+  }
+  if (!respuesta.ok) {
+    throw new ErrorDeApi(await motivo(respuesta));
+  }
+  return respuesta;
+}
+
 async function obtener<T>(ruta: string): Promise<T> {
   const respuesta = await fetch(ruta, { headers: { Accept: "application/json" } });
   if (respuesta.status === 404) {
@@ -42,6 +85,33 @@ export const api = {
   quejasDeEmpresa: (cuit: string, page: number) =>
     obtener<{ items: QuejaResumen[] }>(`/api/empresas/${encodeURIComponent(cuit)}/quejas?page=${page}`),
   queja: (id: string) => obtener<QuejaDetalle>(`/api/quejas/${encodeURIComponent(id)}`),
+
+  async login(email: string, password: string): Promise<Sesion> {
+    const respuesta = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!respuesta.ok) {
+      throw new ErrorDeApi(await motivo(respuesta));
+    }
+    return (await respuesta.json()) as Sesion;
+  },
+
+  async bandeja(token: string, estado: string | null, page = 0): Promise<{ items: ItemDeBandeja[] }> {
+    const filtro = estado ? `&estado=${encodeURIComponent(estado)}` : "";
+    return (await (await conSesion(`/api/panel/quejas?page=${page}${filtro}`, token)).json()) as {
+      items: ItemDeBandeja[];
+    };
+  },
+
+  async cambiarEstado(token: string, id: string, estado: string, comentario: string): Promise<void> {
+    await conSesion(`/api/quejas/${encodeURIComponent(id)}/estado`, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ estado, comentario }),
+    });
+  },
 };
 
 /** El listado no informa si hay más páginas: si vino una página llena, puede haber otra. */

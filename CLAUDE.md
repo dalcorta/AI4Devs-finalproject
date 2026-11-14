@@ -23,8 +23,8 @@ Libro de quejas de consumo público y verificable: el contenido público de cada
 | Carpeta | Stack | Estado |
 |---|---|---|
 | `contracts/` | Solidity 0.8.24, Foundry, OpenZeppelin 5 (vía npm) | Implementado: `ComplaintRegistry` |
-| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | Tickets de publicación y anclaje, listener on-chain y triage con LLM completos, más `POST /api/quejas` (`RegistrarQueja`), login con JWT y los endpoints públicos de lectura (HU-02). Siguiente: frontend con verificación en el navegador (Ticket 6) |
-| `frontend/` | Next.js 16, React 19, TypeScript 5.9, viem, Vitest, Playwright | Ticket 6 completo: búsqueda, quejas de una empresa y detalle, con verificación de integridad en el navegador (`lib/verify.ts`) y E2E contra el entorno de compose |
+| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | Tickets de publicación y anclaje, listener on-chain y triage con LLM completos, más `POST /api/quejas` (`RegistrarQueja`), login con JWT, los endpoints públicos de lectura (HU-02) y el panel del funcionario con cambio de estado anclado on-chain (HU-04). Siguiente: respuesta de la empresa (HU-05) o detección de datos personales (HU-06) |
+| `frontend/` | Next.js 16, React 19, TypeScript 5.9, viem, Vitest, Playwright | Ticket 6 y panel del funcionario (HU-04): búsqueda, quejas de una empresa y detalle con verificación de integridad en el navegador (`lib/verify.ts`), login y bandeja con cambio de estado; E2E contra el entorno de compose |
 | `shared/test-vectors/` | JSON | Vectores del hash canónico, usados por backend y frontend |
 
 Contratos (Foundry está en `~/.foundry/bin`):

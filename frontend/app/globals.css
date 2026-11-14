@@ -93,3 +93,22 @@ code { font-family: ui-monospace, "SFMono-Regular", monospace; font-size: 0.85re
   dl.datos { grid-template-columns: 1fr; }
   dl.datos dd { margin-bottom: 8px; }
 }
+
+form.formulario { display: grid; gap: 12px; max-width: 360px; margin: 16px 0; }
+form.formulario label, label.filtro { display: grid; gap: 4px; color: var(--tenue); font-size: 0.9rem; }
+form.formulario input, form.cambio input, form.cambio select, label.filtro select {
+  padding: 8px 10px; font-size: 1rem; border: 1px solid var(--borde); border-radius: 6px;
+  background: var(--superficie); color: var(--texto); }
+label.filtro { max-width: 240px; margin: 12px 0; }
+.encabezado-panel { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+ul.bandeja li { display: block; }
+.fila-bandeja { display: grid; grid-template-columns: 1fr minmax(0, 320px); gap: 12px; align-items: start; }
+.etiquetas { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.sugerencia { margin: 8px 0 0; font-size: 0.95rem; }
+form.cambio { display: grid; gap: 6px; }
+form.cambio button { padding: 8px 12px; }
+
+@media (max-width: 560px) {
+  .fila-bandeja { grid-template-columns: 1fr; }
+}
+header.sitio a.ingresar { margin-left: auto; font-size: 0.9rem; }

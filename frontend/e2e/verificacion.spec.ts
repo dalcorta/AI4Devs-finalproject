@@ -1,5 +1,5 @@
-import { type APIRequestContext, expect, test } from "@playwright/test";
-import { leerEstado } from "./entorno";
+import { expect, test } from "@playwright/test";
+import { CUIT, RAZON_SOCIAL, registrarYEsperarAnclaje } from "./apoyo";
 
 /**
  * Criterios de aceptación del Ticket 6 y del recorrido E2E del readme, contra el entorno real: la queja se registra
@@ -8,45 +8,14 @@ import { leerEstado } from "./entorno";
  * del navegador, que es exactamente lo que vería quien visita el sitio.
  */
 
-const CUIT = "30712345671";
-const RAZON_SOCIAL = "Telecomunicaciones del Sur S.A.";
 const DESCRIPCION = "Corte de servicio de internet durante 15 días sin respuesta del soporte técnico.";
 
 let quejaId: string;
 
-async function registrarYEsperarAnclaje(request: APIRequestContext): Promise<string> {
-  const { email, clave } = leerEstado();
-  const login = await request.post("/api/auth/login", { data: { email, password: clave } });
-  expect(login.ok()).toBe(true);
-  const { token } = (await login.json()) as { token: string };
-
-  const alta = await request.post("/api/quejas", {
-    headers: { Authorization: `Bearer ${token}` },
-    data: {
-      cuitEmpresa: CUIT,
-      razonSocial: RAZON_SOCIAL,
-      categoria: "telecomunicaciones",
-      descripcion: DESCRIPCION,
-      montoReclamado: 15000,
-      fechaHecho: "2026-11-01",
-    },
-  });
-  expect(alta.status()).toBe(202);
-  const { id } = (await alta.json()) as { id: string };
-
-  await expect
-    .poll(async () => ((await (await request.get(`/api/quejas/${id}`)).json()) as { onchainId: number | null }).onchainId, {
-      message: "La queja no quedó anclada y confirmada a tiempo",
-      timeout: 60_000,
-    })
-    .not.toBeNull();
-  return id;
-}
-
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async ({ request }) => {
-  quejaId = await registrarYEsperarAnclaje(request);
+  quejaId = await registrarYEsperarAnclaje(request, DESCRIPCION);
 });
 
 test("una queja registrada aparece verificada en la consulta pública, empezando por la búsqueda", async ({ page }) => {
@@ -56,9 +25,11 @@ test("una queja registrada aparece verificada en la consulta pública, empezando
   await page.getByRole("link", { name: RAZON_SOCIAL }).click();
 
   await expect(page).toHaveURL(`/empresas/${CUIT}`);
-  await expect(page.getByRole("status")).toHaveText("Verificada");
+  // La empresa puede tener otras quejas (las de otros specs): se mira la fila de esta.
+  const fila = page.getByRole("listitem").filter({ has: page.locator(`a[href="/quejas/${quejaId}"]`) });
+  await expect(fila.getByRole("status")).toHaveText("Verificada");
 
-  await page.getByRole("link", { name: "telecomunicaciones" }).click();
+  await fila.getByRole("link", { name: "telecomunicaciones" }).click();
   await expect(page).toHaveURL(`/quejas/${quejaId}`);
   await expect(page.getByRole("status")).toHaveText("Verificada");
   await expect(page.getByText(DESCRIPCION)).toBeVisible();
