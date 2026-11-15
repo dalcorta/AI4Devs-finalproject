@@ -1,17 +1,22 @@
 package ar.libroabierto.config;
 
 import ar.libroabierto.anchoring.application.AnclajeDeEstados;
+import ar.libroabierto.anchoring.application.AnclajeDeRespuestas;
 import ar.libroabierto.anchoring.application.BlockchainGateway;
 import ar.libroabierto.anchoring.infrastructure.Web3jAnclajeDeEstados;
+import ar.libroabierto.anchoring.infrastructure.Web3jAnclajeDeRespuestas;
 import ar.libroabierto.anchoring.infrastructure.Web3jBlockchainGateway;
 import ar.libroabierto.complaint.application.AnclarCambiosDeEstado;
 import ar.libroabierto.complaint.application.CambiosDeEstado;
 import ar.libroabierto.complaint.application.IpfsGateway;
 import ar.libroabierto.complaint.application.PublicarQuejasPendientes;
+import ar.libroabierto.complaint.application.PublicarRespuestasPendientes;
+import ar.libroabierto.complaint.application.Respuestas;
 import ar.libroabierto.complaint.application.QuejaRepository;
 import ar.libroabierto.complaint.infrastructure.KuboIpfsGateway;
 import ar.libroabierto.listener.application.CheckpointRepository;
 import ar.libroabierto.listener.application.ConfirmacionDeCambios;
+import ar.libroabierto.listener.application.ConfirmacionDeRespuestas;
 import ar.libroabierto.listener.application.FuenteDeEventos;
 import ar.libroabierto.listener.application.ProcesarEventosOnChain;
 import ar.libroabierto.listener.infrastructure.Web3jFuenteDeEventos;
@@ -50,6 +55,20 @@ public class AnclajeConfig {
         return new AnclarCambiosDeEstado(cambios, cadena);
     }
 
+    /** Las respuestas las firma el relayer, igual que las quejas: la empresa no tiene clave on-chain. */
+    @Bean
+    AnclajeDeRespuestas anclajeDeRespuestas(Web3j web3j, LibroAbiertoProperties props) {
+        LibroAbiertoProperties.Blockchain cadena = props.blockchain();
+        return new Web3jAnclajeDeRespuestas(
+                web3j, Credentials.create(cadena.relayerPrivateKey()), cadena.contrato(), cadena.chainId());
+    }
+
+    @Bean
+    PublicarRespuestasPendientes publicarRespuestasPendientes(Respuestas respuestas, IpfsGateway ipfs,
+            AnclajeDeRespuestas cadena) {
+        return new PublicarRespuestasPendientes(respuestas, ipfs, cadena);
+    }
+
     @Bean
     IpfsGateway ipfsGateway(LibroAbiertoProperties props) {
         return new KuboIpfsGateway(props.ipfs().apiUrl());
@@ -68,9 +87,10 @@ public class AnclajeConfig {
 
     @Bean
     ProcesarEventosOnChain procesarEventosOnChain(QuejaRepository repositorio, FuenteDeEventos fuente,
-            CheckpointRepository checkpoint, ConfirmacionDeCambios cambios, LibroAbiertoProperties props) {
+            CheckpointRepository checkpoint, ConfirmacionDeCambios cambios, ConfirmacionDeRespuestas respuestas,
+            LibroAbiertoProperties props) {
         LibroAbiertoProperties.Listener listener = props.listener();
-        return new ProcesarEventosOnChain(repositorio, fuente, checkpoint, cambios,
+        return new ProcesarEventosOnChain(repositorio, fuente, checkpoint, cambios, respuestas,
                 listener.bloqueInicial(), listener.confirmaciones(), listener.maxBloquesPorLote());
     }
 }

@@ -1,5 +1,9 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { CUIT, RAZON_SOCIAL, registrarYEsperarAnclaje } from "./apoyo";
+
+/** El badge de la queja: el detalle también tiene el de la respuesta de la empresa. */
+const badgeDeLaQueja = (page: Page) =>
+  page.getByRole("region", { name: "Verificación de la queja" }).getByRole("status");
 
 /**
  * Criterios de aceptación del Ticket 6 y del recorrido E2E del readme, contra el entorno real: la queja se registra
@@ -31,7 +35,7 @@ test("una queja registrada aparece verificada en la consulta pública, empezando
 
   await fila.getByRole("link", { name: "telecomunicaciones" }).click();
   await expect(page).toHaveURL(`/quejas/${quejaId}`);
-  await expect(page.getByRole("status")).toHaveText("Verificada");
+  await expect(badgeDeLaQueja(page)).toHaveText("Verificada");
   await expect(page.getByText(DESCRIPCION)).toBeVisible();
 });
 
@@ -45,7 +49,7 @@ test("si el gateway sirve contenido manipulado, se ve «Integridad comprometida�
 
   await page.goto(`/quejas/${quejaId}`);
 
-  await expect(page.getByRole("status")).toHaveText("Integridad comprometida");
+  await expect(badgeDeLaQueja(page)).toHaveText("Integridad comprometida");
   await expect(page.getByText("El hash del contenido no coincide con el anclado en la blockchain")).toBeVisible();
   await expect(page.getByText("2 días")).toHaveCount(0);
   await expect(page.getByText(DESCRIPCION)).toHaveCount(0);
@@ -60,7 +64,7 @@ test("si el backend informa un hash que no es el de la cadena, también está co
 
   await page.goto(`/quejas/${quejaId}`);
 
-  await expect(page.getByRole("status")).toHaveText("Integridad comprometida");
+  await expect(badgeDeLaQueja(page)).toHaveText("Integridad comprometida");
   await expect(page.getByText("El hash que informa el sitio no es el anclado en la blockchain")).toBeVisible();
 });
 
@@ -69,10 +73,10 @@ test("si IPFS no responde no se acusa una alteración, y al reintentar se verifi
 
   await page.goto(`/quejas/${quejaId}`);
 
-  await expect(page.getByRole("status")).toHaveText("No se pudo verificar");
+  await expect(badgeDeLaQueja(page)).toHaveText("No se pudo verificar");
   await expect(page.getByText("Integridad comprometida")).toHaveCount(0);
 
   await page.unroute("**/ipfs/**");
   await page.getByRole("button", { name: "Reintentar la verificación" }).click();
-  await expect(page.getByRole("status")).toHaveText("Verificada");
+  await expect(badgeDeLaQueja(page)).toHaveText("Verificada");
 });

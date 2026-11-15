@@ -8,6 +8,12 @@
       "keccak256": "0x6a6fdd46debb996c2eacc63503f54a9dc372ae83424c8edced8e64a139962d4b"
     },
     {
+      "name": "respuesta_empresa_ejemplo",
+      "input": "{\n  \"schema_version\": \"1.0\",\n  \"tipo\": \"respuesta_empresa\",\n  \"queja\": { \"onchain_id\": 1, \"content_hash\": \"0x6a6fdd46debb996c2eacc63503f54a9dc372ae83424c8edced8e64a139962d4b\" },\n  \"empresa\": { \"cuit\": \"30712345678\", \"razon_social\": \"Empresa Ficticia S.A.\" },\n  \"respuesta\": { \"texto\": \"Restablecimos el servicio el 20/10 y acreditamos una bonificación por los días sin conexión.\" },\n  \"respondida_en\": \"2026-10-25T15:30:00Z\"\n}",
+      "canonical": "{\"empresa\":{\"cuit\":\"30712345678\",\"razon_social\":\"Empresa Ficticia S.A.\"},\"queja\":{\"content_hash\":\"0x6a6fdd46debb996c2eacc63503f54a9dc372ae83424c8edced8e64a139962d4b\",\"onchain_id\":1},\"respondida_en\":\"2026-10-25T15:30:00Z\",\"respuesta\":{\"texto\":\"Restablecimos el servicio el 20/10 y acreditamos una bonificación por los días sin conexión.\"},\"schema_version\":\"1.0\",\"tipo\":\"respuesta_empresa\"}",
+      "keccak256": "0x955d815cc56bc3a0364b7bc301af9a682d1bef98d36730698bc44cecf4e02940"
+    },
+    {
       "name": "orden_de_claves_y_espacios",
       "input": "{ \"b\" : 1 ,\n\t\"a\": 2, \"c\": { \"z\": true, \"y\": null, \"x\": false } }",
       "canonical": "{\"a\":2,\"b\":1,\"c\":{\"x\":false,\"y\":null,\"z\":true}}",

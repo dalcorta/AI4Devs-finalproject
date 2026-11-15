@@ -31,6 +31,14 @@ public final class ComplaintRegistryAbi {
 
     public static final String STATUS_CHANGED_TOPIC = EventEncoder.encode(STATUS_CHANGED);
 
+    /** {@code ResponseFiled(uint256 indexed complaintId, bytes32 contentHash, string ipfsCid)}. */
+    public static final Event RESPONSE_FILED = new Event("ResponseFiled", List.of(
+            new TypeReference<Uint256>(true) { },
+            new TypeReference<Bytes32>() { },
+            new TypeReference<Utf8String>() { }));
+
+    public static final String RESPONSE_FILED_TOPIC = EventEncoder.encode(RESPONSE_FILED);
+
     private ComplaintRegistryAbi() {
     }
 }

@@ -22,6 +22,20 @@ export type QuejaDetalle = {
   estado: string;
   historialEstados: CambioDeEstado[];
   evidenciasCids: string[];
+  /** null si la empresa no respondió. El texto no viene acá: se lee de IPFS y se verifica contra la cadena. */
+  respuesta: { anchorStatus: string; txHash: string | null; createdAt: string } | null;
+};
+
+export type QuejaRecibida = {
+  id: string;
+  onchainId: number | null;
+  categoria: string;
+  fechaHecho: string;
+  estado: string;
+  /** Si ya se puede responder (la queja está anclada). */
+  anclada: boolean;
+  /** Estado de anclaje de la respuesta, o null si todavía no respondió. */
+  respuesta: string | null;
 };
 
 export class NoEncontrado extends Error {}
@@ -103,6 +117,24 @@ export const api = {
     return (await (await conSesion(`/api/panel/quejas?page=${page}${filtro}`, token)).json()) as {
       items: ItemDeBandeja[];
     };
+  },
+
+  async bandejaEmpresa(
+    token: string,
+    page = 0,
+  ): Promise<{ empresa: EmpresaResumen; items: QuejaRecibida[] }> {
+    return (await (await conSesion(`/api/empresa/quejas?page=${page}`, token)).json()) as {
+      empresa: EmpresaResumen;
+      items: QuejaRecibida[];
+    };
+  },
+
+  async responder(token: string, id: string, texto: string): Promise<void> {
+    await conSesion(`/api/quejas/${encodeURIComponent(id)}/respuesta`, token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texto }),
+    });
   },
 
   async cambiarEstado(token: string, id: string, estado: string, comentario: string): Promise<void> {

@@ -26,17 +26,28 @@ contract ComplaintRegistry is AccessControl {
         Status status;
     }
 
+    /// @notice Respuesta pública de la empresa denunciada (una por queja).
+    struct Response {
+        bytes32 contentHash; // keccak256 del JSON público de la respuesta, canonicalizado
+        string ipfsCid; // CID de ese JSON
+        uint64 timestamp;
+    }
+
     event ComplaintFiled(uint256 indexed id, uint64 indexed companyCuit, bytes32 contentHash, string ipfsCid);
     event StatusChanged(uint256 indexed id, Status previous, Status current, bytes32 noteHash);
+    event ResponseFiled(uint256 indexed complaintId, bytes32 contentHash, string ipfsCid);
 
     error ComplaintNotFound(uint256 id);
     error InvalidTransition(Status from, Status to);
     error ComplaintAlreadyFiled(bytes32 contentHash, uint256 existingId);
+    error ResponseAlreadyFiled(uint256 complaintId);
+    error ResponseNotFound(uint256 complaintId);
 
     uint256 private _nextId = 1;
     mapping(uint256 => Complaint) private _complaints;
     // El backend correlaciona eventos con quejas por contentHash: debe ser único on-chain.
     mapping(bytes32 => uint256) private _idByContentHash;
+    mapping(uint256 => Response) private _responses;
 
     constructor(address admin) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
@@ -83,6 +94,35 @@ contract ComplaintRegistry is AccessControl {
 
         complaint.status = newStatus;
         emit StatusChanged(id, previous, newStatus, noteHash);
+    }
+
+    /// @notice Ancla la respuesta de la empresa a una queja. La firma el relayer: el backend ya comprobó que quien
+    /// responde representa a la empresa denunciada, y el documento publicado lleva el CUIT y el hash de la queja.
+    /// Hay una sola respuesta por queja, en cualquier estado: el derecho a responder no vence.
+    function fileResponse(uint256 complaintId, bytes32 contentHash, string calldata ipfsCid)
+        external
+        onlyRole(RELAYER_ROLE)
+    {
+        if (_complaints[complaintId].timestamp == 0) revert ComplaintNotFound(complaintId);
+        if (_responses[complaintId].timestamp != 0) revert ResponseAlreadyFiled(complaintId);
+
+        _responses[complaintId] = Response({
+            contentHash: contentHash,
+            ipfsCid: ipfsCid,
+            // forge-lint: disable-next-line(unsafe-typecast)
+            timestamp: uint64(block.timestamp)
+        });
+
+        emit ResponseFiled(complaintId, contentHash, ipfsCid);
+    }
+
+    function getResponse(uint256 complaintId) external view returns (Response memory) {
+        if (_responses[complaintId].timestamp == 0) revert ResponseNotFound(complaintId);
+        return _responses[complaintId];
+    }
+
+    function hasResponse(uint256 complaintId) external view returns (bool) {
+        return _responses[complaintId].timestamp != 0;
     }
 
     function getComplaint(uint256 id) external view returns (Complaint memory) {

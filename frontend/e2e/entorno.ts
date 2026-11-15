@@ -28,6 +28,8 @@ export type Estado = {
   contrato: string;
   ciudadana: Credenciales;
   funcionaria: Credenciales;
+  /** Representante de la empresa de las quejas de prueba (CUIT de apoyo.ts). */
+  empresa: Credenciales;
   pids: number[];
 };
 

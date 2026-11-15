@@ -7,6 +7,7 @@ import pg from "pg";
 import { type Abi, type Address, type Hex, createPublicClient, createWalletClient, http, keccak256, toBytes } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
+import { CUIT, RAZON_SOCIAL } from "./apoyo";
 import {
   ARCHIVO_ESTADO,
   BACKEND_URL,
@@ -139,15 +140,26 @@ async function desplegarContrato(): Promise<{ contrato: Address; bloque: bigint 
   return { contrato, bloque: recibo.blockNumber };
 }
 
-async function crearUsuario(rol: "CIUDADANO" | "FUNCIONARIO"): Promise<Credenciales> {
+async function crearUsuario(rol: "CIUDADANO" | "FUNCIONARIO" | "EMPRESA"): Promise<Credenciales> {
   const email = `${rol.toLowerCase()}-e2e-${Date.now()}@example.test`;
   const clave = randomBytes(18).toString("base64url");
   const db = new pg.Client({ ...POSTGRES, database: BASE_E2E });
   await db.connect();
+  // El representante necesita su empresa: es la misma contra la que la ciudadana registra las quejas.
+  const empresa =
+    rol === "EMPRESA"
+      ? (
+          await db.query<{ id: string }>(
+            `INSERT INTO empresa (id, cuit, razon_social) VALUES (gen_random_uuid(), $1, $2)
+             ON CONFLICT (cuit) DO UPDATE SET razon_social = EXCLUDED.razon_social RETURNING id`,
+            [CUIT, RAZON_SOCIAL],
+          )
+        ).rows[0].id
+      : null;
   await db.query(
-    `INSERT INTO usuario (id, email, password_hash, rol, nombre_completo, identidad_verificada)
-     VALUES (gen_random_uuid(), $1, $2, $3, 'Persona Ficticia E2E', true)`,
-    [email, await bcrypt.hash(clave, 10), rol],
+    `INSERT INTO usuario (id, email, password_hash, rol, nombre_completo, identidad_verificada, empresa_id)
+     VALUES (gen_random_uuid(), $1, $2, $3, 'Persona Ficticia E2E', true, $4)`,
+    [email, await bcrypt.hash(clave, 10), rol, empresa],
   );
   await db.end();
   return { email, clave };
@@ -226,6 +238,7 @@ async function armarEntorno() {
     contrato,
     ciudadana: await crearUsuario("CIUDADANO"),
     funcionaria: await crearUsuario("FUNCIONARIO"),
+    empresa: await crearUsuario("EMPRESA"),
     pids: [backend.pid!, frontend.pid!],
   };
   writeFileSync(ARCHIVO_ESTADO, JSON.stringify(estado, null, 2));

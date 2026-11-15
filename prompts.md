@@ -591,3 +591,47 @@ Resultado:
 **Verificación y ajustes humanos**
 1. **Un falso positivo evitado en el propio test.** Antes del cambio, el select de la fila ya ofrece la opción "En revisión", así que buscar ese texto suelto habría dado el test por bueno sin que nada cambiara. Se acotó la comprobación al badge de estado.
 2. **Datos compartidos entre specs.** El spec del panel corre primero y registra otra queja contra la misma empresa. El test de verificación, que daba por hecho una sola queja en la lista, encontró dos badges y falló. Se acotó a la fila de su propia queja en lugar de borrar datos entre specs.
+
+---
+
+## Implementación — Respuesta de la empresa (HU-05) (Claude Code)
+
+**Prompt**
+```
+HU-05 company reply
+```
+
+El readme solo tenía una línea para HU-05, sin tabla, función del contrato, documento público ni endpoint. Antes de escribir código, Claude planteó las tres decisiones que cambiaban el diseño y se eligió:
+- **Contrato:** una función nueva `fileResponse` firmada por el relayer (la empresa entra con su JWT y no tiene clave on-chain), en lugar de una tercera clave institucional.
+- **Cantidad:** una sola respuesta por queja, exigida por la base y por el contrato.
+- **Datos personales:** publicar con una advertencia en el formulario y dejar la detección automática para HU-06, documentada como limitación conocida, en lugar de una moderación previa del funcionario.
+
+Resultado:
+- **Contrato:** `fileResponse`, `getResponse`, `hasResponse` y el evento `ResponseFiled`. La respuesta se guarda por id de queja, se rechaza una segunda y se admite en cualquier estado (el derecho a responder no vence). 6 tests nuevos de Foundry.
+- **Documento público:** referencia el id y el hash on-chain de la queja y no lleva quién respondió. Su vector compartido (`respuesta_empresa_ejemplo`) se calculó con la librería `canonicalize` y `cast keccak`, no con el código que prueba; lo usan los tests de Java y de TypeScript.
+- **Backend:**
+  - migración V4 con la tabla `respuesta`;
+  - `ResponderQueja`: 400, 403 si no es de la empresa denunciada, 404, y 409 si la queja no está anclada o ya tiene respuesta;
+  - `PublicarRespuestasPendientes`: worker outbox con el mismo ritmo que las quejas;
+  - `Web3jAnclajeDeRespuestas`: idempotente; si la queja ya tiene otra respuesta anclada, falla en lugar de tomar esa transacción como propia;
+  - el listener confirma con `ResponseFiled`, buscando por hash y por el id de la queja;
+  - endpoints `GET /api/empresa/quejas` y `POST /api/quejas/{id}/respuesta`;
+  - el detalle público informa si hay respuesta y su estado de anclaje, sin el texto ni el autor.
+- **Frontend:**
+  - `/login` lleva a cada rol a su panel;
+  - `/empresa`: las quejas recibidas, primero las ancladas sin responder, con un formulario que advierte que la respuesta es pública y permanente;
+  - el detalle verifica la respuesta en el navegador (`verificarRespuesta`) y la muestra solo si queda verificada y referencia a esa queja. La cadena manda: si el contrato tiene una respuesta, se muestra aunque la API diga que no hay.
+- **Resultados:** 16 tests de contrato, 246 de backend (0 omitidos), 53 unitarios de frontend y 10 E2E pasan.
+
+**Verificación y ajustes humanos**
+1. **Garantías comprobadas rompiéndolas a propósito**, y cada rotura hizo fallar su test:
+   - en el contrato, quitar el rechazo de la segunda respuesta;
+   - en `ResponderQueja`, quitar el chequeo de empresa, el de anclaje y el de "ya respondida";
+   - en el frontend, quitar el chequeo de que la respuesta referencia a esa queja, y el de "el sitio dice confirmada pero la cadena no la tiene".
+   - Una mutación del frontend rompió la sintaxis en vez de la lógica (vitest no encontró tests): se rehízo antes de contarla como detectada.
+2. **Datos compartidos entre tests.** Las clases de test con la misma configuración comparten contexto de Spring y base. Con la tabla nueva y los usuarios EMPRESA (que referencian `empresa`), hubo que borrar `respuesta` antes que `queja` y `usuario` antes que `empresa` en las limpiezas de los otros tests.
+3. **Fallas de la primera corrida, todas de los tests:**
+   - un CUIT de prueba con dígito verificador inválido, recalculado aparte;
+   - dos restricciones probadas en una misma transacción (la primera la aborta), separadas en dos tests;
+   - el test de migraciones no conocía la V4;
+   - en E2E, el detalle ahora tiene dos badges (queja y respuesta). Se le dio una región propia a la verificación de la queja y se acotaron las comprobaciones viejas a esa región.

@@ -146,6 +146,75 @@ contract ComplaintRegistryTest is Test {
         vm.stopPrank();
     }
 
+    bytes32 constant RESPONSE_HASH = keccak256("respuesta-publica-de-prueba");
+    string constant RESPONSE_CID = "bafyResponseCid";
+
+    function test_fileResponse_emitsEventAndStoresData() public {
+        uint256 id = _fileSampleComplaint();
+
+        vm.expectEmit(true, false, false, true, address(registry));
+        emit ComplaintRegistry.ResponseFiled(id, RESPONSE_HASH, RESPONSE_CID);
+
+        vm.prank(relayer);
+        registry.fileResponse(id, RESPONSE_HASH, RESPONSE_CID);
+
+        assertTrue(registry.hasResponse(id));
+        ComplaintRegistry.Response memory response = registry.getResponse(id);
+        assertEq(response.contentHash, RESPONSE_HASH);
+        assertEq(response.ipfsCid, RESPONSE_CID);
+        assertEq(response.timestamp, uint64(block.timestamp));
+    }
+
+    function test_fileResponse_allowsOnlyOneResponsePerComplaint() public {
+        uint256 id = _fileSampleComplaint();
+        vm.startPrank(relayer);
+        registry.fileResponse(id, RESPONSE_HASH, RESPONSE_CID);
+
+        vm.expectRevert(abi.encodeWithSelector(ComplaintRegistry.ResponseAlreadyFiled.selector, id));
+        registry.fileResponse(id, keccak256("otra respuesta"), "otroCid");
+        vm.stopPrank();
+    }
+
+    function test_fileResponse_revertsOnUnknownComplaint() public {
+        vm.prank(relayer);
+        vm.expectRevert(abi.encodeWithSelector(ComplaintRegistry.ComplaintNotFound.selector, 999));
+        registry.fileResponse(999, RESPONSE_HASH, RESPONSE_CID);
+    }
+
+    function test_fileResponse_revertsWithoutRelayerRole() public {
+        uint256 id = _fileSampleComplaint();
+        bytes32 relayerRole = registry.RELAYER_ROLE();
+
+        // Ni siquiera el funcionario: las respuestas las publica el relayer en nombre de la empresa.
+        vm.prank(officer);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, officer, relayerRole)
+        );
+        registry.fileResponse(id, RESPONSE_HASH, RESPONSE_CID);
+    }
+
+    function test_fileResponse_isAllowedInTerminalState() public {
+        uint256 id = _fileSampleComplaint();
+        vm.startPrank(officer);
+        registry.changeStatus(id, ComplaintRegistry.Status.EN_REVISION, bytes32(0));
+        registry.changeStatus(id, ComplaintRegistry.Status.DERIVADA, bytes32(0));
+        registry.changeStatus(id, ComplaintRegistry.Status.DESESTIMADA, bytes32(0));
+        vm.stopPrank();
+
+        vm.prank(relayer);
+        registry.fileResponse(id, RESPONSE_HASH, RESPONSE_CID);
+
+        assertTrue(registry.hasResponse(id));
+    }
+
+    function test_getResponse_revertsWhenThereIsNone() public {
+        uint256 id = _fileSampleComplaint();
+
+        assertFalse(registry.hasResponse(id));
+        vm.expectRevert(abi.encodeWithSelector(ComplaintRegistry.ResponseNotFound.selector, id));
+        registry.getResponse(id);
+    }
+
     function _fileSampleComplaint() private returns (uint256 id) {
         vm.prank(relayer);
         id = registry.fileComplaint(COMPANY_CUIT, CONTENT_HASH, IPFS_CID);

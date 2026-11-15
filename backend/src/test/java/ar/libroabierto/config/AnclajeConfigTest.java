@@ -9,7 +9,10 @@ import ar.libroabierto.complaint.application.PublicarQuejasPendientes;
 import ar.libroabierto.complaint.domain.CambioDeEstado;
 import ar.libroabierto.complaint.application.QuejaRepository;
 import ar.libroabierto.listener.application.CheckpointRepository;
+import ar.libroabierto.complaint.application.PublicarRespuestasPendientes;
+import ar.libroabierto.complaint.application.Respuestas;
 import ar.libroabierto.listener.application.ConfirmacionDeCambios;
+import ar.libroabierto.listener.application.ConfirmacionDeRespuestas;
 import ar.libroabierto.listener.application.ProcesarEventosOnChain;
 import java.util.List;
 import java.util.Optional;
@@ -66,6 +69,8 @@ class AnclajeConfigTest {
                 }
             })
             .withBean(ConfirmacionDeCambios.class, () -> evento -> { })
+            .withBean(ConfirmacionDeRespuestas.class, () -> evento -> { })
+            .withBean(Respuestas.class, () -> org.mockito.Mockito.mock(Respuestas.class))
             .withBean(CheckpointRepository.class, () -> new CheckpointRepository() {
                 @Override
                 public OptionalLong ultimoBloque() {
@@ -118,6 +123,7 @@ class AnclajeConfigTest {
                     assertThat(ctx).hasSingleBean(PublicarQuejasPendientes.class);
                     assertThat(ctx).hasSingleBean(ProcesarEventosOnChain.class);
                     assertThat(ctx).hasSingleBean(AnclarCambiosDeEstado.class);
+                    assertThat(ctx).hasSingleBean(PublicarRespuestasPendientes.class);
                     assertThat(ctx.getBean(LibroAbiertoProperties.class).toString())
                             .doesNotContain(CLAVE, CLAVE_FUNCIONARIO);
                 });

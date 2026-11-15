@@ -47,9 +47,10 @@ class ConsultaPublicaApiTest {
         jdbc.update("DELETE FROM cambio_estado");
         jdbc.update("DELETE FROM evidencia");
         jdbc.update("DELETE FROM triage");
+        jdbc.update("DELETE FROM respuesta");
         jdbc.update("DELETE FROM queja");
-        jdbc.update("DELETE FROM empresa");
         jdbc.update("DELETE FROM usuario");
+        jdbc.update("DELETE FROM empresa");
         usuario = UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO usuario (id, email, password_hash, rol, nombre_completo, identidad_verificada)

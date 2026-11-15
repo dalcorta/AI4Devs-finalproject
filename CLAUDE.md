@@ -15,16 +15,16 @@ Libro de quejas de consumo público y verificable: el contenido público de cada
 - Un ticket de la sección 6 del readme por vez, en orden de dependencia.
 - **Tests primero:** escribir los tests a partir de los criterios de aceptación del ticket, verlos fallar y después implementar.
 - Una tarea no está terminada hasta que su suite de tests corre y pasa; si no se pudo ejecutar, se dice explícitamente.
-- Prioridad del MVP: el recorrido registrar → anclar → verificar de punta a punta con cadena local (Anvil), IPFS local (Kubo) y LLM por API. Respuesta de la empresa, detección de PII, cifrado en reposo, Pinata y testnet pública quedan para después.
+- Prioridad del MVP: el recorrido registrar → anclar → verificar de punta a punta con cadena local (Anvil), IPFS local (Kubo) y LLM por API. Detección de PII, cifrado en reposo, Pinata y testnet pública quedan para después.
 - El dominio usa nombres en español (`Queja`, `Empresa`, `estado`), igual que el readme; el código técnico y las APIs de librerías quedan en inglés.
 
 ## Estructura y comandos
 
 | Carpeta | Stack | Estado |
 |---|---|---|
-| `contracts/` | Solidity 0.8.24, Foundry, OpenZeppelin 5 (vía npm) | Implementado: `ComplaintRegistry` |
-| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | Tickets de publicación y anclaje, listener on-chain y triage con LLM completos, más `POST /api/quejas` (`RegistrarQueja`), login con JWT, los endpoints públicos de lectura (HU-02) y el panel del funcionario con cambio de estado anclado on-chain (HU-04). Siguiente: respuesta de la empresa (HU-05) o detección de datos personales (HU-06) |
-| `frontend/` | Next.js 16, React 19, TypeScript 5.9, viem, Vitest, Playwright | Ticket 6 y panel del funcionario (HU-04): búsqueda, quejas de una empresa y detalle con verificación de integridad en el navegador (`lib/verify.ts`), login y bandeja con cambio de estado; E2E contra el entorno de compose |
+| `contracts/` | Solidity 0.8.24, Foundry, OpenZeppelin 5 (vía npm) | Implementado: `ComplaintRegistry`, con quejas, cambios de estado y una respuesta de empresa por queja |
+| `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | Tickets de publicación y anclaje, listener on-chain y triage con LLM completos, más `POST /api/quejas` (`RegistrarQueja`), login con JWT, los endpoints públicos de lectura (HU-02) el panel del funcionario con cambio de estado anclado on-chain (HU-04) y la respuesta pública de la empresa (HU-05). Siguiente: detección de datos personales (HU-06) |
+| `frontend/` | Next.js 16, React 19, TypeScript 5.9, viem, Vitest, Playwright | Ticket 6 y panel del funcionario (HU-04): búsqueda, quejas de una empresa y detalle con verificación de integridad en el navegador (`lib/verify.ts`), login por rol, bandeja con cambio de estado, panel de la empresa con respuesta y su verificación en el detalle; E2E contra el entorno de compose |
 | `shared/test-vectors/` | JSON | Vectores del hash canónico, usados por backend y frontend |
 
 Contratos (Foundry está en `~/.foundry/bin`):
@@ -69,9 +69,11 @@ Los valores esperados de `shared/test-vectors/canonical-hash.json` no se generan
 
 En el backend, el dominio no conoce Web3j ni el proveedor del LLM: se accede por puertos (`BlockchainGateway`, `LlmClient`) con adaptadores reemplazables. El listener lee eventos con `eth_getLogs` por lotes desde `listener_checkpoint` (polling, no WebSocket) y es idempotente: reprocesar un evento no cambia la queja. El triage es otro worker outbox: toma las quejas `CONFIRMADA` sin triage, le manda al LLM solo `DocumentoPublico` delimitado entre `<queja>` y `</queja>`, valida la salida contra `resources/triage/salida-triage.schema.json` y filtra los artículos contra `ArticulosLey24240`. Ese esquema es la única fuente: al proveedor se le manda una versión sin las restricciones que la API no acepta, y la validación local usa el completo. Los tests del triage nunca llaman al proveedor real: usan un LLM simulado o un servidor HTTP local.
 
-Seguridad de la API: sin sesión, JWT HS256 con `sub` = id interno y `rol`; nada de email ni nombre en el token. Lo que no está permitido explícitamente en `SeguridadConfig` se niega. El denunciante de una queja sale siempre del token, nunca del cuerpo del pedido. `UsuarioEntity` no mapea nombre, DNI ni teléfono: ningún flujo actual los necesita. La lectura pública (`JdbcConsultasPublicas`) usa SQL explícito, columna por columna, para que se vea qué sale: nunca `usuario_id`, `actor_id` ni `comentario`.
+Seguridad de la API: sin sesión, JWT HS256 con `sub` = id interno y `rol`; nada de email ni nombre en el token. Lo que no está permitido explícitamente en `SeguridadConfig` se niega. El denunciante de una queja sale siempre del token, nunca del cuerpo del pedido. `UsuarioEntity` no mapea nombre, DNI ni teléfono: ningún flujo actual los necesita. La lectura pública (`JdbcConsultasPublicas`) usa SQL explícito, columna por columna, para que se vea qué sale: nunca `usuario_id`, `actor_id`, `autor_id` ni `comentario`.
 
 Frontend: la verificación no confía en el backend. De la API solo toma `onchainId`; el CID y el hash los lee del contrato, baja el contenido de IPFS con ese CID y recalcula el hash canónico. `NO_VERIFICABLE` (IPFS o la cadena no respondieron) nunca se muestra como `COMPROMETIDA`, y el contenido de una queja se muestra solo si quedó `VERIFICADA`. La API del backend se consume por el mismo origen (rewrite en `next.config.ts`, `BACKEND_URL`); IPFS y la cadena, directo desde el navegador (`NEXT_PUBLIC_*`, ver `frontend/.env.example`).
+
+Respuesta de la empresa (HU-05): una por queja, solo de un usuario EMPRESA de la empresa denunciada y solo con la queja anclada. La firma el relayer (`fileResponse`), la publica y ancla `PublicarRespuestasPendientes` (mismo worker y ritmo que las quejas) y la confirma el listener con `ResponseFiled`, buscándola por `content_hash` y por el id on-chain de la queja. El documento (`DocumentoRespuesta`) referencia el id y el hash on-chain de la queja y no lleva `autor_id`. En el navegador, `verificarRespuesta` lee la respuesta del contrato aunque la API diga que no hay, y la muestra solo si queda `VERIFICADA` y referencia a esa queja. Hasta HU-06 no hay detección de datos personales en el texto: el formulario solo advierte.
 
 Panel del funcionario (HU-04): el cambio de estado queda en la base al instante con un `UPDATE` condicional (si otro funcionario la cambió en el medio, 409) y lo ancla el mismo worker de publicación, en orden por queja. El adaptador es idempotente: si ya hay un `StatusChanged` hacia ese estado, devuelve esa transacción. El listener confirma la transacción con el evento real.
 

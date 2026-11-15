@@ -18,8 +18,8 @@ export default function Layout({ children }: { children: ReactNode }) {
               LibroAbierto
             </Link>
             <span>Quejas de consumo públicas y verificables</span>
-            <Link href="/panel" className="ingresar">
-              Organismo
+            <Link href="/login" className="ingresar">
+              Ingresar
             </Link>
           </div>
         </header>

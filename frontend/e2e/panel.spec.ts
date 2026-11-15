@@ -31,7 +31,7 @@ test("una ciudadana no entra al panel", async ({ page }) => {
   await page.getByLabel("Contraseña").fill(clave);
   await page.getByRole("button", { name: "Ingresar" }).click();
 
-  await expect(page.getByText("solo para funcionarios")).toBeVisible();
+  await expect(page.getByText("solo para el organismo y las empresas")).toBeVisible();
   await expect(page).toHaveURL("/login");
 });
 

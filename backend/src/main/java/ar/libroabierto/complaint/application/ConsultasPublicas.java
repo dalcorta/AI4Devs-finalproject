@@ -8,7 +8,7 @@ import java.util.UUID;
 
 /**
  * Lectura pública (HU-02). Los modelos traen solo lo que ya es público o sirve para verificar: nunca el usuario, el
- * actor de un cambio de estado ni sus comentarios internos.
+ * actor de un cambio de estado ni sus comentarios internos, ni quién respondió por la empresa.
  */
 public interface ConsultasPublicas {
 
@@ -30,8 +30,12 @@ public interface ConsultasPublicas {
             LocalDate fechaHecho) {
     }
 
+    /** @param respuesta nula si la empresa no respondió; el texto no viaja acá, se lee de IPFS y se verifica */
     record QuejaDetalle(UUID id, Long onchainId, String ipfsCid, String contentHash, String estado,
-            List<CambioDeEstado> historialEstados, List<String> evidenciasCids) {
+            List<CambioDeEstado> historialEstados, List<String> evidenciasCids, RespuestaDeEmpresa respuesta) {
+    }
+
+    record RespuestaDeEmpresa(String anchorStatus, String txHash, Instant createdAt) {
     }
 
     record CambioDeEstado(String estadoAnterior, String estadoNuevo, String txHash, Instant createdAt) {

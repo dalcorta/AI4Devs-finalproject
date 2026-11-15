@@ -89,8 +89,10 @@ Pantallas previstas:
 - `/` — buscador por CUIT o razón social.
 - `/empresas/{cuit}` — listado público de quejas con badge de verificación.
 - `/quejas/nueva` — formulario de queja (requiere login de ciudadano).
-- `/quejas/{id}` — detalle público con historial de estados y enlaces a las transacciones.
+- `/quejas/{id}` — detalle público con historial de estados, enlaces a las transacciones y la respuesta de la empresa verificada.
+- `/login` — ingreso del funcionario y de los representantes de empresa; cada rol va a su panel.
 - `/panel` — bandeja del funcionario ordenada por prioridad.
+- `/empresa` — quejas recibidas por la empresa, con el formulario de respuesta pública (should-have).
 
 ### **1.4. Instrucciones de instalación:**
 
@@ -311,6 +313,17 @@ erDiagram
         varchar tx_hash "NULL hasta anclar"
         timestamptz created_at "NOT NULL"
     }
+    RESPUESTA {
+        uuid id PK
+        uuid queja_id FK,UK "NOT NULL (una por queja)"
+        uuid autor_id FK "NOT NULL, interno"
+        text texto "NOT NULL, max 3000"
+        varchar ipfs_cid "NULL hasta publicar"
+        char content_hash UK "NULL hasta publicar, 0x + 64 hex"
+        varchar tx_hash "NULL hasta anclar"
+        varchar anchor_status "NOT NULL: PENDIENTE | ENVIADA | CONFIRMADA | FALLIDA"
+        timestamptz created_at "NOT NULL"
+    }
     TRANSACCION_BLOCKCHAIN {
         uuid id PK
         varchar tx_hash UK "NOT NULL"
@@ -334,6 +347,8 @@ erDiagram
     QUEJA ||--o| TRIAGE : "tiene"
     QUEJA ||--o{ CAMBIO_ESTADO : "historial"
     USUARIO ||--o{ CAMBIO_ESTADO : "realiza"
+    QUEJA ||--o| RESPUESTA : "respondida por la empresa"
+    USUARIO ||--o{ RESPUESTA : "escribe (rol EMPRESA)"
 ```
 
 **Estado on-chain (`ComplaintRegistry`):**
@@ -349,12 +364,28 @@ struct Complaint {
     Status  status;
 }
 
+struct Response {
+    bytes32 contentHash;   // keccak256 del JSON público de la respuesta, canonicalizado
+    string  ipfsCid;
+    uint64  timestamp;
+}
+
 event ComplaintFiled(uint256 indexed id, uint64 indexed companyCuit, bytes32 contentHash, string ipfsCid);
 event StatusChanged(uint256 indexed id, Status previous, Status current, bytes32 noteHash);
+event ResponseFiled(uint256 indexed complaintId, bytes32 contentHash, string ipfsCid);
 
 error ComplaintAlreadyFiled(bytes32 contentHash, uint256 existingId);
 function complaintIdByHash(bytes32 contentHash) external view returns (uint256);
+
+// HU-05: una sola respuesta por queja (RELAYER_ROLE), en cualquier estado.
+error ResponseAlreadyFiled(uint256 complaintId);
+error ResponseNotFound(uint256 complaintId);
+function fileResponse(uint256 complaintId, bytes32 contentHash, string calldata ipfsCid) external;
+function getResponse(uint256 complaintId) external view returns (Response memory);
+function hasResponse(uint256 complaintId) external view returns (bool);
 ```
+
+La respuesta de la empresa la firma también el relayer: la empresa no tiene clave on-chain y el backend comprueba, con su JWT, que quien responde representa a la empresa denunciada. El contrato guarda la respuesta por id de queja y rechaza una segunda; el adaptador Web3j busca el `ResponseFiled` de esa queja antes de enviar y, si ya está con el mismo hash, devuelve esa transacción.
 
 `contentHash` es único on-chain: `fileComplaint` revierte si ya fue registrado. Como el backend correlaciona el evento con la queja por ese hash, esto impide que un reintento del relayer ancle la misma queja dos veces; el adaptador Web3j consulta `complaintIdByHash` antes de enviar y, si ya existe, devuelve la transacción original.
 
@@ -366,6 +397,7 @@ function complaintIdByHash(bytes32 contentHash) external view returns (uint256);
 - **EVIDENCIA:** archivos públicos adjuntos a una queja (fotos del producto, capturas), publicados en IPFS. Las facturas con datos personales no se publican.
 - **TRIAGE:** resultado del LLM, en relación 1 a 1 con la queja. Guarda el modelo usado y los intentos, para trazabilidad. En estado `MANUAL` ("Triage manual") ninguna salida del LLM pasó la validación tras los reintentos, y no lleva los campos sugeridos.
 - **CAMBIO_ESTADO:** historial auditable de transiciones; cada una se ancla on-chain y guarda su `tx_hash`.
+- **RESPUESTA:** respuesta pública de la empresa denunciada (HU-05), una por queja. Se publica y se ancla como la queja, con su propio `content_hash` para que el listener la encuentre al recibir `ResponseFiled`. `autor_id` (el usuario que respondió) es interno: no va a IPFS ni a la API pública.
 - **TRANSACCION_BLOCKCHAIN:** registro de las transacciones enviadas por el relayer, con reintentos y confirmación.
 - **LISTENER_CHECKPOINT:** último bloque procesado por el listener, para recuperarse tras un reinicio sin perder ni duplicar eventos.
 
@@ -387,6 +419,21 @@ function complaintIdByHash(bytes32 contentHash) external view returns (uint256);
 ```
 
 No contiene ningún dato del denunciante.
+
+**Respuesta pública de la empresa en IPFS** (HU-05):
+
+```json
+{
+  "schema_version": "1.0",
+  "tipo": "respuesta_empresa",
+  "queja": { "onchain_id": 1, "content_hash": "0x6a6f...2d4b" },
+  "empresa": { "cuit": "30712345678", "razon_social": "Empresa Ficticia S.A." },
+  "respuesta": { "texto": "Restablecimos el servicio el 20/10 y acreditamos una bonificación por los días sin conexión." },
+  "respondida_en": "2026-10-25T15:30:00Z"
+}
+```
+
+La queja se referencia por su id y su hash on-chain, así la respuesta queda atada a la queja que responde. No lleva quién respondió. El ejemplo completo está en `shared/test-vectors/canonical-hash.json` (`respuesta_empresa_ejemplo`).
 
 ---
 
@@ -504,6 +551,16 @@ paths:
                   evidenciasCids:
                     type: array
                     items: { type: string }
+                  respuesta:
+                    type: object
+                    nullable: true
+                    description: >-
+                      Respuesta de la empresa, o null si no respondió. El texto no viaja acá: el navegador lo lee de
+                      IPFS con el CID del contrato y lo verifica
+                    properties:
+                      anchorStatus: { type: string, enum: [PENDIENTE, ENVIADA, CONFIRMADA, FALLIDA] }
+                      txHash: { type: string }
+                      createdAt: { type: string, format: date-time }
         '404': { description: Queja no encontrada }
 
   /api/quejas/{id}/evidencias:
@@ -619,6 +676,73 @@ paths:
         '404': { description: Queja no encontrada }
         '409': { description: Transición de estado no permitida, o queja todavía no anclada on-chain }
 
+  /api/empresa/quejas:
+    get:
+      summary: >-
+        Quejas contra la empresa del usuario (rol EMPRESA): primero las ancladas sin responder, después de la más
+        nueva a la más vieja. Nunca incluye quién se quejó
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: La empresa y sus quejas recibidas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  empresa:
+                    type: object
+                    properties:
+                      cuit: { type: string }
+                      razonSocial: { type: string }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        onchainId: { type: integer }
+                        categoria: { type: string }
+                        fechaHecho: { type: string, format: date }
+                        estado: { type: string }
+                        anclada: { type: boolean, description: Si ya se puede responder }
+                        respuesta:
+                          type: string
+                          nullable: true
+                          enum: [PENDIENTE, ENVIADA, CONFIRMADA, FALLIDA]
+        '403': { description: El usuario no tiene rol EMPRESA }
+
+  /api/quejas/{id}/respuesta:
+    post:
+      summary: Responder públicamente una queja contra la empresa del usuario (rol EMPRESA), una sola vez
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [texto]
+              properties:
+                texto: { type: string, minLength: 1, maxLength: 3000 }
+      responses:
+        '202':
+          description: Respuesta aceptada; publicación en IPFS y anclaje on-chain en curso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+        '400': { description: Texto vacío o de más de 3000 caracteres }
+        '403': { description: El usuario no tiene rol EMPRESA o no representa a la empresa denunciada }
+        '404': { description: Queja no encontrada }
+        '409': { description: La queja todavía no está anclada on-chain, o ya tiene una respuesta }
+
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -681,6 +805,10 @@ Criterios de aceptación:
 
 **Should-have**
 - **HU-05 — Respuesta de la empresa:** un usuario con rol EMPRESA responde a una queja contra su CUIT; la respuesta se publica en IPFS y se ancla.
+  - Solo responde un representante de la empresa denunciada, una sola vez por queja (lo exigen la base y el contrato), y solo cuando la queja ya está anclada; el derecho a responder no vence con el estado de la queja.
+  - La firma on-chain la hace el relayer; el documento público referencia el id y el hash on-chain de la queja y no lleva quién respondió.
+  - La vista pública muestra la respuesta solo si su contenido se verifica en el navegador contra el contrato. La cadena manda: una respuesta anclada se muestra aunque el backend diga que no hay.
+  - El formulario advierte que la respuesta es pública y permanente y que no debe incluir datos personales del consumidor. **Limitación conocida:** hasta HU-06 no hay detección automática; cuando exista, se aplicará también a las respuestas.
 - **HU-06 — Detección de datos personales:** antes de publicar, el LLM analiza la descripción y, si detecta datos personales, avisa al ciudadano y le pide que los quite o confirme. Esta verificación corre **siempre con un modelo local (Ollama)**, nunca contra el proveedor por API usado para el triage post-publicación: en este punto la descripción todavía no es pública, así que no puede salir del backend.
 
 ---

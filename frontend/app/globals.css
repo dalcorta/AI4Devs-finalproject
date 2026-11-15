@@ -112,3 +112,11 @@ form.cambio button { padding: 8px 12px; }
   .fila-bandeja { grid-template-columns: 1fr; }
 }
 header.sitio a.ingresar { margin-left: auto; font-size: 0.9rem; }
+
+.alerta-aviso { background: var(--aviso-fondo); color: var(--aviso); }
+form.respuesta-form { display: grid; gap: 6px; }
+form.respuesta-form textarea {
+  padding: 8px 10px; font: inherit; border: 1px solid var(--borde); border-radius: 6px;
+  background: var(--superficie); color: var(--texto); resize: vertical; }
+form.respuesta-form button { padding: 8px 12px; justify-self: start; }
+p.respuesta { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }

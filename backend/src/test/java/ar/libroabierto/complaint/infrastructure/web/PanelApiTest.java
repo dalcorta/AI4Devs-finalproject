@@ -51,8 +51,8 @@ class PanelApiTest {
 
     @BeforeEach
     void datos() {
-        for (String tabla : new String[] {"cambio_estado", "transaccion_blockchain", "triage", "evidencia", "queja",
-                "empresa", "usuario"}) {
+        for (String tabla : new String[] {"respuesta", "cambio_estado", "transaccion_blockchain", "triage", "evidencia",
+                "queja", "usuario", "empresa"}) {
             jdbc.update("DELETE FROM " + tabla);
         }
         ciudadano = usuario("ciudadana@example.test", "CIUDADANO");

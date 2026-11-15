@@ -26,7 +26,37 @@ export const complaintRegistryAbi = [
     name: "ComplaintNotFound",
     inputs: [{ name: "id", type: "uint256" }],
   },
+  {
+    type: "function",
+    name: "getResponse",
+    stateMutability: "view",
+    inputs: [{ name: "complaintId", type: "uint256" }],
+    outputs: [
+      {
+        type: "tuple",
+        components: [
+          { name: "contentHash", type: "bytes32" },
+          { name: "ipfsCid", type: "string" },
+          { name: "timestamp", type: "uint64" },
+        ],
+      },
+    ],
+  },
+  {
+    type: "error",
+    name: "ResponseNotFound",
+    inputs: [{ name: "complaintId", type: "uint256" }],
+  },
 ] as const;
+
+/** true si el error es un revert del contrato con ese nombre; cualquier otro error (red, RPC) no lo es. */
+function esRevert(error: unknown, nombre: string): boolean {
+  if (!(error instanceof BaseError)) {
+    return false;
+  }
+  const revert = error.walk((e) => e instanceof ContractFunctionRevertedError);
+  return revert instanceof ContractFunctionRevertedError && revert.data?.errorName === nombre;
+}
 
 export function crearLectorDeAnclajes(config: { rpcUrl: string; contrato: Address }) {
   const cliente = createPublicClient({ transport: http(config.rpcUrl, { retryCount: 1 }) });
@@ -42,11 +72,30 @@ export function crearLectorDeAnclajes(config: { rpcUrl: string; contrato: Addres
       return { contentHash: queja.contentHash, ipfsCid: queja.ipfsCid };
     } catch (error) {
       // Solo un revert ComplaintNotFound significa "no existe"; cualquier otro error (red, RPC) se propaga.
-      if (error instanceof BaseError) {
-        const revert = error.walk((e) => e instanceof ContractFunctionRevertedError);
-        if (revert instanceof ContractFunctionRevertedError && revert.data?.errorName === "ComplaintNotFound") {
-          return null;
-        }
+      if (esRevert(error, "ComplaintNotFound")) {
+        return null;
+      }
+      throw error;
+    }
+  };
+}
+
+/** Lee la respuesta de la empresa anclada para una queja: null si no tiene (o si la queja no existe). */
+export function crearLectorDeRespuestas(config: { rpcUrl: string; contrato: Address }) {
+  const cliente = createPublicClient({ transport: http(config.rpcUrl, { retryCount: 1 }) });
+
+  return async function leerRespuesta(onchainId: bigint): Promise<Anclaje | null> {
+    try {
+      const respuesta = await cliente.readContract({
+        address: config.contrato,
+        abi: complaintRegistryAbi,
+        functionName: "getResponse",
+        args: [onchainId],
+      });
+      return { contentHash: respuesta.contentHash, ipfsCid: respuesta.ipfsCid };
+    } catch (error) {
+      if (esRevert(error, "ResponseNotFound")) {
+        return null;
       }
       throw error;
     }

@@ -27,7 +27,7 @@ class EsquemaTest {
     @Test
     void flywayAplicaLasMigraciones() {
         assertThat(jdbc.queryForList("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank",
-                String.class)).containsExactly("1", "2", "3");
+                String.class)).containsExactly("1", "2", "3", "4");
     }
 
     @Test

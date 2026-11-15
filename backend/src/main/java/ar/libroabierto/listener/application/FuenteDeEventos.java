@@ -12,4 +12,7 @@ public interface FuenteDeEventos {
 
     /** Eventos {@code StatusChanged} entre {@code desde} y {@code hasta}, ambos inclusive, en orden de cadena. */
     List<EventoEstadoCambiado> estadosCambiados(long desde, long hasta);
+
+    /** Eventos {@code ResponseFiled} entre {@code desde} y {@code hasta}, ambos inclusive, en orden de cadena. */
+    List<EventoRespuestaRegistrada> respuestasRegistradas(long desde, long hasta);
 }

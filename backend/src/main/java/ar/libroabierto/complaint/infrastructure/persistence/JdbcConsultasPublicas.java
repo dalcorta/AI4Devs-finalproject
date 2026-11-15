@@ -15,7 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Lado de lectura con SQL directo: son proyecciones planas y así queda a la vista, columna por columna, qué sale a
- * la API pública. Ninguna consulta selecciona usuario_id, actor_id ni comentario.
+ * la API pública. Ninguna consulta selecciona usuario_id, actor_id, autor_id ni comentario.
  */
 @Component
 class JdbcConsultasPublicas implements ConsultasPublicas {
@@ -92,8 +92,12 @@ class JdbcConsultasPublicas implements ConsultasPublicas {
         List<String> evidencias = jdbc.queryForList(
                 "SELECT ipfs_cid FROM evidencia WHERE queja_id = :id ORDER BY created_at, id", Map.of("id", id),
                 String.class);
+        RespuestaDeEmpresa respuesta = jdbc.query(
+                "SELECT anchor_status, tx_hash, created_at FROM respuesta WHERE queja_id = :id", Map.of("id", id),
+                (rs, i) -> new RespuestaDeEmpresa(rs.getString("anchor_status"), rs.getString("tx_hash"),
+                        rs.getTimestamp("created_at").toInstant())).stream().findFirst().orElse(null);
         return Optional.of(new QuejaDetalle(queja.id(), queja.onchainId(), queja.ipfsCid(), queja.contentHash(),
-                queja.estado(), historial, evidencias));
+                queja.estado(), historial, evidencias, respuesta));
     }
 
     private static Long onchainId(ResultSet rs) throws SQLException {

@@ -31,6 +31,7 @@ class ProcesarEventosOnChainTest {
     private CadenaFalsa cadena;
     private CheckpointEnMemoria checkpoint;
     private ConfirmacionesEnMemoria confirmados;
+    private RespuestasConfirmadasEnMemoria respuestas;
 
     @BeforeEach
     void setUp() {
@@ -38,6 +39,7 @@ class ProcesarEventosOnChainTest {
         cadena = new CadenaFalsa();
         checkpoint = new CheckpointEnMemoria();
         confirmados = new ConfirmacionesEnMemoria();
+        respuestas = new RespuestasConfirmadasEnMemoria();
     }
 
     @Test
@@ -169,9 +171,24 @@ class ProcesarEventosOnChainTest {
         assertThat(checkpoint.valor).isEqualTo(OptionalLong.of(5));
     }
 
+    @Test
+    void confirmaLasRespuestasDeLasEmpresasDelLote() {
+        EventoRespuestaRegistrada respuesta = new EventoRespuestaRegistrada(3, HASH_B, "bafy-respuesta", 4,
+                String.format("0x%064x", 77));
+        cadena.emitir(respuesta);
+        cadena.emitir(new EventoRespuestaRegistrada(4, HASH_A, "bafy-otra", 9, String.format("0x%064x", 78)));
+        cadena.bloqueActual = 5;
+
+        ProcesarEventosOnChain.Resultado resultado = listener(0, 0, 100).ejecutar();
+
+        assertThat(respuestas.confirmadas).containsExactly(respuesta);
+        assertThat(resultado.respuestasConfirmadas()).isEqualTo(1);
+        assertThat(checkpoint.valor).isEqualTo(OptionalLong.of(5));
+    }
+
     private ProcesarEventosOnChain listener(long bloqueInicial, int confirmaciones, int maxBloquesPorLote) {
-        return new ProcesarEventosOnChain(repositorio, cadena, checkpoint, confirmados, bloqueInicial, confirmaciones,
-                maxBloquesPorLote);
+        return new ProcesarEventosOnChain(repositorio, cadena, checkpoint, confirmados, respuestas, bloqueInicial,
+                confirmaciones, maxBloquesPorLote);
     }
 
     private static EventoQuejaRegistrada evento(long onchainId, String contentHash, long bloque) {
@@ -233,6 +250,7 @@ class ProcesarEventosOnChainTest {
     static class CadenaFalsa implements FuenteDeEventos {
         private final List<EventoQuejaRegistrada> eventos = new ArrayList<>();
         private final List<EventoEstadoCambiado> cambios = new ArrayList<>();
+        private final List<EventoRespuestaRegistrada> respuestas = new ArrayList<>();
         final List<Rango> consultas = new ArrayList<>();
         long bloqueActual;
 
@@ -242,6 +260,15 @@ class ProcesarEventosOnChainTest {
 
         void emitir(EventoEstadoCambiado evento) {
             cambios.add(evento);
+        }
+
+        void emitir(EventoRespuestaRegistrada evento) {
+            respuestas.add(evento);
+        }
+
+        @Override
+        public List<EventoRespuestaRegistrada> respuestasRegistradas(long desde, long hasta) {
+            return respuestas.stream().filter(e -> e.bloque() >= desde && e.bloque() <= hasta).toList();
         }
 
         @Override
@@ -267,6 +294,15 @@ class ProcesarEventosOnChainTest {
         @Override
         public void confirmar(EventoEstadoCambiado evento) {
             confirmados.add(evento);
+        }
+    }
+
+    static class RespuestasConfirmadasEnMemoria implements ConfirmacionDeRespuestas {
+        final List<EventoRespuestaRegistrada> confirmadas = new ArrayList<>();
+
+        @Override
+        public void confirmar(EventoRespuestaRegistrada evento) {
+            confirmadas.add(evento);
         }
     }
 

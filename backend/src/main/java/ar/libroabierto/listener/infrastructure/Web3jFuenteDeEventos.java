@@ -4,6 +4,7 @@ import ar.libroabierto.anchoring.infrastructure.ComplaintRegistryAbi;
 import ar.libroabierto.complaint.domain.EstadoQueja;
 import ar.libroabierto.listener.application.EventoEstadoCambiado;
 import ar.libroabierto.listener.application.EventoQuejaRegistrada;
+import ar.libroabierto.listener.application.EventoRespuestaRegistrada;
 import ar.libroabierto.listener.application.FuenteDeEventos;
 import java.io.IOException;
 import java.math.BigInteger;
@@ -19,7 +20,7 @@ import org.web3j.tx.Contract;
 import org.web3j.utils.Numeric;
 
 /**
- * Lee {@code ComplaintFiled} con {@code eth_getLogs} sobre rangos de bloques acotados. Se usa polling en lugar de
+ * Lee los eventos del contrato con {@code eth_getLogs} sobre rangos de bloques acotados. Se usa polling en lugar de
  * una suscripción por WebSocket: funciona con cualquier RPC HTTP y, junto con el checkpoint, no pierde eventos si
  * la conexión se corta.
  */
@@ -74,6 +75,34 @@ public class Web3jFuenteDeEventos implements FuenteDeEventos {
         } catch (IOException e) {
             throw new IllegalStateException("Error de comunicación con el nodo", e);
         }
+    }
+
+    @Override
+    public List<EventoRespuestaRegistrada> respuestasRegistradas(long desde, long hasta) {
+        EthFilter filtro = new EthFilter(
+                DefaultBlockParameter.valueOf(BigInteger.valueOf(desde)),
+                DefaultBlockParameter.valueOf(BigInteger.valueOf(hasta)),
+                contrato)
+                .addSingleTopic(ComplaintRegistryAbi.RESPONSE_FILED_TOPIC);
+        try {
+            EthLog logs = web3j.ethGetLogs(filtro).send();
+            exigirSinError(logs, "Falló la lectura de eventos ResponseFiled");
+            return logs.getLogs().stream().map(resultado -> decodificarRespuesta((Log) resultado.get())).toList();
+        } catch (IOException e) {
+            throw new IllegalStateException("Error de comunicación con el nodo", e);
+        }
+    }
+
+    @SuppressWarnings("rawtypes")
+    private static EventoRespuestaRegistrada decodificarRespuesta(Log log) {
+        var valores = Contract.staticExtractEventParameters(ComplaintRegistryAbi.RESPONSE_FILED, log);
+        List<Type> datos = valores.getNonIndexedValues();
+        return new EventoRespuestaRegistrada(
+                ((BigInteger) valores.getIndexedValues().get(0).getValue()).longValueExact(),
+                Numeric.toHexString((byte[]) datos.get(0).getValue()),
+                (String) datos.get(1).getValue(),
+                log.getBlockNumber().longValueExact(),
+                log.getTransactionHash());
     }
 
     @SuppressWarnings("rawtypes")

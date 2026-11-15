@@ -7,7 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Listener de {@code ComplaintFiled}: lee los eventos por lotes de bloques desde el último checkpoint y confirma cada
+ * Listener de {@code ComplaintFiled}, {@code StatusChanged} y {@code ResponseFiled}: lee los eventos por lotes de bloques desde el último checkpoint y confirma cada
  * queja buscándola por content_hash. Una queja CONFIRMADA queda lista para el worker de triage, que la toma por su
  * cuenta (patrón outbox): el listener no depende de que el LLM responda.
  *
@@ -22,12 +22,13 @@ public class ProcesarEventosOnChain {
     private final FuenteDeEventos cadena;
     private final CheckpointRepository checkpoint;
     private final ConfirmacionDeCambios cambios;
+    private final ConfirmacionDeRespuestas respuestas;
     private final long bloqueInicial;
     private final int confirmaciones;
     private final int maxBloquesPorLote;
 
     public ProcesarEventosOnChain(QuejaRepository quejas, FuenteDeEventos cadena, CheckpointRepository checkpoint,
-            ConfirmacionDeCambios cambios, long bloqueInicial, int confirmaciones, int maxBloquesPorLote) {
+            ConfirmacionDeCambios cambios, ConfirmacionDeRespuestas respuestas, long bloqueInicial, int confirmaciones, int maxBloquesPorLote) {
         if (bloqueInicial < 0 || confirmaciones < 0 || maxBloquesPorLote < 1) {
             throw new IllegalArgumentException("Configuración del listener inválida");
         }
@@ -35,6 +36,7 @@ public class ProcesarEventosOnChain {
         this.cadena = cadena;
         this.checkpoint = checkpoint;
         this.cambios = cambios;
+        this.respuestas = respuestas;
         this.bloqueInicial = bloqueInicial;
         this.confirmaciones = confirmaciones;
         this.maxBloquesPorLote = maxBloquesPorLote;
@@ -48,6 +50,7 @@ public class ProcesarEventosOnChain {
         int confirmadas = 0;
         int ignorados = 0;
         int cambiosConfirmados = 0;
+        int respuestasConfirmadas = 0;
 
         while (procesado < ultimoSeguro) {
             long desde = procesado + 1;
@@ -64,10 +67,15 @@ public class ProcesarEventosOnChain {
                 cambios.confirmar(cambio);
                 cambiosConfirmados++;
             }
+            // Una respuesta también es posterior al anclaje de su queja.
+            for (EventoRespuestaRegistrada respuesta : cadena.respuestasRegistradas(desde, hasta)) {
+                respuestas.confirmar(respuesta);
+                respuestasConfirmadas++;
+            }
             checkpoint.guardar(hasta);
             procesado = hasta;
         }
-        return new Resultado(confirmadas, ignorados, cambiosConfirmados, procesado);
+        return new Resultado(confirmadas, ignorados, cambiosConfirmados, respuestasConfirmadas, procesado);
     }
 
     private boolean aplicar(EventoQuejaRegistrada evento) {
@@ -89,6 +97,7 @@ public class ProcesarEventosOnChain {
     /**
      * @param hastaBloque último bloque procesado (el checkpoint) al terminar la ejecución
      */
-    public record Resultado(int confirmadas, int ignorados, int cambiosConfirmados, long hastaBloque) {
+    public record Resultado(int confirmadas, int ignorados, int cambiosConfirmados, int respuestasConfirmadas,
+            long hastaBloque) {
     }
 }

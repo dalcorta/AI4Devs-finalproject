@@ -64,3 +64,79 @@ export async function verificarQueja(datos: DatosDelBackend, deps: Dependencias)
   }
   return { estado: "VERIFICADA", documento: JSON.parse(contenido) };
 }
+
+export type DependenciasDeRespuesta = Dependencias & {
+  /** null si el contrato no tiene respuesta para esa queja; un error si la cadena no respondió. */
+  leerRespuesta: (onchainId: bigint) => Promise<Anclaje | null>;
+};
+
+/** Lo que dice el backend de la respuesta: solo se usa para distinguir "pendiente" de "no hay". */
+export type RespuestaDelBackend = { onchainId: number | null; respuesta: { anchorStatus: string } | null };
+
+export type EstadoVerificacionDeRespuesta = EstadoVerificacion | "SIN_RESPUESTA";
+export type ResultadoDeRespuesta = { estado: EstadoVerificacionDeRespuesta; motivo?: string; documento?: unknown };
+
+type DocumentoDeRespuesta = { tipo?: unknown; queja?: { onchain_id?: unknown; content_hash?: unknown } };
+
+/**
+ * Verifica la respuesta de la empresa como la queja: CID y hash salen del contrato (que guarda la respuesta por id de
+ * queja). La cadena manda: una respuesta anclada se muestra aunque el backend diga que no hay, así el sitio no puede
+ * ocultarla. Además, el documento tiene que referenciar a esta queja (su id y el hash anclado).
+ */
+export async function verificarRespuesta(
+  datos: RespuestaDelBackend,
+  deps: DependenciasDeRespuesta,
+): Promise<ResultadoDeRespuesta> {
+  if (datos.onchainId === null) {
+    return { estado: "SIN_RESPUESTA" };
+  }
+  const id = BigInt(datos.onchainId);
+
+  let anclaje: Anclaje | null;
+  try {
+    anclaje = await deps.leerRespuesta(id);
+  } catch {
+    return { estado: "NO_VERIFICABLE", motivo: "No se pudo leer la blockchain" };
+  }
+  if (anclaje === null) {
+    if (datos.respuesta === null) {
+      return { estado: "SIN_RESPUESTA" };
+    }
+    if (datos.respuesta.anchorStatus === "CONFIRMADA") {
+      return { estado: "COMPROMETIDA", motivo: "El sitio informa una respuesta que la blockchain no tiene" };
+    }
+    return { estado: "PENDIENTE" };
+  }
+
+  let contenido: string;
+  let queja: Anclaje | null;
+  try {
+    contenido = await deps.leerIpfs(anclaje.ipfsCid);
+    queja = await deps.leerAnclaje(id);
+  } catch {
+    return { estado: "NO_VERIFICABLE", motivo: "No se pudo descargar la respuesta de IPFS o leer la queja" };
+  }
+
+  let calculado: string;
+  try {
+    calculado = hashCanonico(contenido);
+  } catch {
+    return { estado: "COMPROMETIDA", motivo: "La respuesta descargada no es un documento JSON válido" };
+  }
+  if (!iguales(calculado, anclaje.contentHash)) {
+    return { estado: "COMPROMETIDA", motivo: "El hash de la respuesta no coincide con el anclado en la blockchain" };
+  }
+
+  const documento = JSON.parse(contenido) as DocumentoDeRespuesta;
+  const referencia = documento.queja;
+  if (
+    documento.tipo !== "respuesta_empresa" ||
+    referencia?.onchain_id !== datos.onchainId ||
+    typeof referencia.content_hash !== "string" ||
+    queja === null ||
+    !iguales(referencia.content_hash, queja.contentHash)
+  ) {
+    return { estado: "COMPROMETIDA", motivo: "La respuesta anclada referencia otra queja" };
+  }
+  return { estado: "VERIFICADA", documento };
+}

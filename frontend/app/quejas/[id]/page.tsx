@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BadgeVerificacion } from "@/components/BadgeVerificacion";
-import { useVerificacion } from "@/components/useVerificacion";
+import { useVerificacion, useVerificacionDeRespuesta } from "@/components/useVerificacion";
 import { api, NoEncontrado, type QuejaDetalle } from "@/lib/api";
 import { enlaceTx } from "@/lib/config";
 
@@ -12,6 +12,47 @@ type Documento = {
   queja?: { categoria?: string; descripcion?: string; fecha_hecho?: string; monto_reclamado_ars?: number };
   registrada_en?: string;
 };
+
+type DocumentoDeRespuesta = { respuesta?: { texto?: string }; respondida_en?: string };
+
+/** La respuesta pública de la empresa: se muestra solo si su contenido quedó verificado contra la cadena. */
+function RespuestaDeLaEmpresa({ queja }: { queja: QuejaDetalle }) {
+  const { resultado, reintentar } = useVerificacionDeRespuesta(queja);
+
+  if (resultado.estado === "SIN_RESPUESTA") {
+    return <p className="tenue">La empresa todavía no respondió.</p>;
+  }
+  const documento = resultado.estado === "VERIFICADA" ? (resultado.documento as DocumentoDeRespuesta) : null;
+  return (
+    <section aria-label="Respuesta de la empresa">
+      <p>
+        <BadgeVerificacion resultado={{ ...resultado, estado: resultado.estado }} />
+      </p>
+      {resultado.motivo && (
+        <p className={resultado.estado === "COMPROMETIDA" ? "alerta alerta-error" : "tenue"}>{resultado.motivo}</p>
+      )}
+      {resultado.estado === "NO_VERIFICABLE" && (
+        <button className="secundario" onClick={reintentar}>
+          Reintentar la verificación de la respuesta
+        </button>
+      )}
+      {resultado.estado === "PENDIENTE" && (
+        <p className="tenue">La empresa respondió; la respuesta se va a poder leer cuando termine su anclaje.</p>
+      )}
+      {documento && (
+        <div className="panel">
+          <p className="respuesta">{documento.respuesta?.texto}</p>
+          <p className="tenue">Respondida el {documento.respondida_en}</p>
+        </div>
+      )}
+      {queja.respuesta?.txHash && (
+        <p className="tenue">
+          Transacción: <Tx hash={queja.respuesta.txHash} />
+        </p>
+      )}
+    </section>
+  );
+}
 
 function Tx({ hash }: { hash: string | null }) {
   if (!hash) {
@@ -57,43 +98,48 @@ export default function DetalleDeQueja() {
   return (
     <>
       <h1>Queja</h1>
-      <p>
-        <BadgeVerificacion resultado={resultado} />
-      </p>
-      {resultado.motivo && <p className={resultado.estado === "COMPROMETIDA" ? "alerta alerta-error" : "tenue"}>{resultado.motivo}</p>}
-      {resultado.estado === "NO_VERIFICABLE" && (
-        <button className="secundario" onClick={reintentar}>
-          Reintentar la verificación
-        </button>
-      )}
+      <section aria-label="Verificación de la queja">
+        <p>
+          <BadgeVerificacion resultado={resultado} />
+        </p>
+        {resultado.motivo && <p className={resultado.estado === "COMPROMETIDA" ? "alerta alerta-error" : "tenue"}>{resultado.motivo}</p>}
+        {resultado.estado === "NO_VERIFICABLE" && (
+          <button className="secundario" onClick={reintentar}>
+            Reintentar la verificación
+          </button>
+        )}
 
-      {documento && (
-        <section className="panel">
-          <dl className="datos">
-            <dt>Empresa</dt>
-            <dd>
-              {documento.empresa?.razon_social} (CUIT {documento.empresa?.cuit})
-            </dd>
-            <dt>Categoría</dt>
-            <dd>{documento.queja?.categoria}</dd>
-            <dt>Fecha del hecho</dt>
-            <dd>{documento.queja?.fecha_hecho}</dd>
-            {documento.queja?.monto_reclamado_ars !== undefined && (
-              <>
-                <dt>Monto reclamado</dt>
-                <dd>$ {documento.queja.monto_reclamado_ars.toLocaleString("es-AR")}</dd>
-              </>
-            )}
-            <dt>Descripción</dt>
-            <dd>{documento.queja?.descripcion}</dd>
-            <dt>Registrada</dt>
-            <dd>{documento.registrada_en}</dd>
-          </dl>
+        {documento && (
+          <section className="panel">
+            <dl className="datos">
+              <dt>Empresa</dt>
+              <dd>
+                {documento.empresa?.razon_social} (CUIT {documento.empresa?.cuit})
+              </dd>
+              <dt>Categoría</dt>
+              <dd>{documento.queja?.categoria}</dd>
+              <dt>Fecha del hecho</dt>
+              <dd>{documento.queja?.fecha_hecho}</dd>
+              {documento.queja?.monto_reclamado_ars !== undefined && (
+                <>
+                  <dt>Monto reclamado</dt>
+                  <dd>$ {documento.queja.monto_reclamado_ars.toLocaleString("es-AR")}</dd>
+                </>
+              )}
+              <dt>Descripción</dt>
+              <dd>{documento.queja?.descripcion}</dd>
+              <dt>Registrada</dt>
+              <dd>{documento.registrada_en}</dd>
+            </dl>
         </section>
       )}
       {resultado.estado === "PENDIENTE" && (
         <p className="tenue">El contenido se va a poder leer y verificar cuando termine el anclaje en la blockchain.</p>
       )}
+      </section>
+
+      <h2>Respuesta de la empresa</h2>
+      <RespuestaDeLaEmpresa queja={queja} />
 
       <h2>Datos de verificación</h2>
       <dl className="datos">

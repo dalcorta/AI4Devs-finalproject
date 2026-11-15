@@ -16,7 +16,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
-import { crearLectorDeAnclajes } from "@/lib/chain";
+import { crearLectorDeAnclajes, crearLectorDeRespuestas } from "@/lib/chain";
 
 /**
  * El ABI del frontend está escrito a mano: este test lo contrasta con el contrato compilado por Forge, desplegado en
@@ -29,6 +29,7 @@ const RELAYER = privateKeyToAccount("0x59c6995e998f97a5a0044966f0945389dc9e86dae
 const ANVIL = join(homedir(), ".foundry", "bin", "anvil");
 const ARTEFACTO = join(__dirname, "..", "..", "contracts", "out", "ComplaintRegistry.sol", "ComplaintRegistry.json");
 const HASH: Hex = `0x${"ab".repeat(32)}`;
+const HASH_RESPUESTA: Hex = `0x${"cd".repeat(32)}`;
 
 let anvil: ChildProcess;
 let rpcUrl: string;
@@ -85,6 +86,14 @@ beforeAll(async () => {
     args: [30712345671n, HASH, "bafy-cid-real"],
   });
   await publico.waitForTransactionReceipt({ hash: alta });
+
+  const respuesta = await relayer.writeContract({
+    address: contrato,
+    abi: artefacto.abi,
+    functionName: "fileResponse",
+    args: [1n, HASH_RESPUESTA, "bafy-respuesta-real"],
+  });
+  await publico.waitForTransactionReceipt({ hash: respuesta });
 }, 60_000);
 
 afterAll(() => {
@@ -106,6 +115,26 @@ describe("crearLectorDeAnclajes contra un ComplaintRegistry real", () => {
 
   it("un RPC caído es un error, no un null", async () => {
     const leer = crearLectorDeAnclajes({ rpcUrl: "http://127.0.0.1:1", contrato });
+
+    await expect(leer(1n)).rejects.toThrow();
+  });
+});
+
+describe("crearLectorDeRespuestas contra un ComplaintRegistry real", () => {
+  it("lee el hash y el CID de la respuesta anclada", async () => {
+    const leer = crearLectorDeRespuestas({ rpcUrl, contrato });
+
+    expect(await leer(1n)).toEqual({ contentHash: HASH_RESPUESTA, ipfsCid: "bafy-respuesta-real" });
+  });
+
+  it("una queja sin respuesta, o que no existe, devuelve null", async () => {
+    const leer = crearLectorDeRespuestas({ rpcUrl, contrato });
+
+    expect(await leer(99n)).toBeNull();
+  });
+
+  it("un RPC caído es un error, no un null", async () => {
+    const leer = crearLectorDeRespuestas({ rpcUrl: "http://127.0.0.1:1", contrato });
 
     await expect(leer(1n)).rejects.toThrow();
   });

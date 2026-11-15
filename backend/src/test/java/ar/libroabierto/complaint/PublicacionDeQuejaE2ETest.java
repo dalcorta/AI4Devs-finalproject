@@ -11,6 +11,7 @@ import ar.libroabierto.PostgresTestcontainer;
 import ar.libroabierto.complaint.application.QuejaRepository;
 import ar.libroabierto.listener.application.CheckpointRepository;
 import ar.libroabierto.listener.application.ConfirmacionDeCambios;
+import ar.libroabierto.listener.application.ConfirmacionDeRespuestas;
 import ar.libroabierto.listener.application.FuenteDeEventos;
 import ar.libroabierto.listener.application.ProcesarEventosOnChain;
 import ar.libroabierto.triage.application.LlmClient;
@@ -89,6 +90,9 @@ class PublicacionDeQuejaE2ETest {
 
     @Autowired
     private ConfirmacionDeCambios confirmaciones;
+
+    @Autowired
+    private ConfirmacionDeRespuestas respuestas;
 
     @DynamicPropertySource
     static void infraestructura(DynamicPropertyRegistry props) throws Exception {
@@ -173,7 +177,7 @@ class PublicacionDeQuejaE2ETest {
             }
         };
         ProcesarEventosOnChain.Resultado replay = new ProcesarEventosOnChain(
-                quejas, fuente, sinCheckpoint, confirmaciones, 0, 0, 1000).ejecutar();
+                quejas, fuente, sinCheckpoint, confirmaciones, respuestas, 0, 0, 1000).ejecutar();
 
         assertThat(replay.confirmadas()).isZero();
         assertThat(replay.ignorados()).isPositive();
@@ -221,6 +225,60 @@ class PublicacionDeQuejaE2ETest {
         mvc.perform(get("/api/quejas/" + queja))
                 .andExpect(jsonPath("$.estado").value("EN_REVISION"))
                 .andExpect(jsonPath("$.historialEstados[0].txHash").value((String) transaccion.get("tx_hash")));
+    }
+
+    /** HU-05: la empresa denunciada responde; la respuesta se publica en IPFS, la ancla el relayer y la confirma el evento. */
+    @Test
+    void laEmpresaRespondeYLaRespuestaQuedaPublicadaAncladaYConfirmada() throws Exception {
+        UUID queja = quejaPorApi("30888888884", "Me cobraron un cargo que nunca contraté.");
+        Map<String, Object> anclada = esperarEstado(queja, "CONFIRMADA");
+        String representante = "representante-" + UUID.randomUUID() + "@example.test";
+        String token = conToken(representante, "EMPRESA", "Representante Ficticio Único",
+                jdbc.queryForObject("SELECT empresa_id FROM queja WHERE id = ?", UUID.class, queja));
+
+        mvc.perform(post("/api/quejas/" + queja + "/respuesta").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"texto\": \"Anulamos el cargo y lo reintegramos en la próxima factura.\"}"))
+                .andExpect(status().isAccepted());
+
+        Instant limite = Instant.now().plus(Duration.ofSeconds(30));
+        Map<String, Object> respuesta = Map.of();
+        while (Instant.now().isBefore(limite)) {
+            respuesta = jdbc.queryForMap(
+                    "SELECT anchor_status, ipfs_cid, content_hash, tx_hash FROM respuesta WHERE queja_id = ?", queja);
+            if ("CONFIRMADA".equals(respuesta.get("anchor_status"))) {
+                break;
+            }
+            Thread.sleep(200);
+        }
+        assertThat(respuesta).as("La respuesta no quedó confirmada on-chain a tiempo")
+                .containsEntry("anchor_status", "CONFIRMADA");
+        var recibo = anvil.esperarRecibo((String) respuesta.get("tx_hash"));
+        assertThat(recibo.getFrom()).isEqualToIgnoringCase(AnvilLocal.RELAYER.getAddress());
+
+        String documento = leerDeIpfs((String) respuesta.get("ipfs_cid"));
+        assertThat(CanonicalHasher.hash(documento)).isEqualTo(respuesta.get("content_hash"));
+        assertThat(new ObjectMapper().readTree(documento).get("queja").get("content_hash").asText())
+                .isEqualTo(anclada.get("content_hash"));
+        assertThat(documento).contains("Anulamos el cargo")
+                .doesNotContain(representante, "Representante Ficticio Único", "Persona Ficticia Única");
+
+        String publico = mvc.perform(get("/api/quejas/" + queja))
+                .andExpect(jsonPath("$.respuesta.anchorStatus").value("CONFIRMADA"))
+                .andExpect(jsonPath("$.respuesta.txHash").value((String) respuesta.get("tx_hash")))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(publico).doesNotContain(representante, "autor");
+    }
+
+    private String conToken(String email, String rol, String nombre, UUID empresa) throws Exception {
+        jdbc.update("""
+                INSERT INTO usuario (id, email, password_hash, rol, nombre_completo, identidad_verificada, empresa_id)
+                VALUES (?, ?, ?, ?, ?, true, ?)""",
+                UUID.randomUUID(), email, new BCryptPasswordEncoder().encode("clave-e2e"), rol, nombre, empresa);
+        String login = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\": \"" + email + "\", \"password\": \"clave-e2e\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        return new ObjectMapper().readTree(login).get("token").asText();
     }
 
     private String funcionarioConToken() throws Exception {

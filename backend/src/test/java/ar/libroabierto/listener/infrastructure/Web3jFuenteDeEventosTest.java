@@ -6,6 +6,7 @@ import ar.libroabierto.anchoring.infrastructure.Web3jBlockchainGateway;
 import ar.libroabierto.complaint.domain.EstadoQueja;
 import ar.libroabierto.listener.application.EventoEstadoCambiado;
 import ar.libroabierto.listener.application.EventoQuejaRegistrada;
+import ar.libroabierto.listener.application.EventoRespuestaRegistrada;
 import ar.libroabierto.support.AnvilLocal;
 import java.util.List;
 import org.junit.jupiter.api.AfterAll;
@@ -13,7 +14,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
-/** Lee eventos ComplaintFiled reales emitidos por el contrato desplegado en Anvil. */
+/** Lee eventos reales emitidos por el contrato desplegado en Anvil. */
 class Web3jFuenteDeEventosTest {
 
     private static final String HASH_1 = "0x" + "1".repeat(64);
@@ -79,6 +80,18 @@ class Web3jFuenteDeEventosTest {
         assertThat(fuente.estadosCambiados(0, fuente.bloqueActual())).containsExactly(new EventoEstadoCambiado(1,
                 EstadoQueja.REGISTRADA, EstadoQueja.EN_REVISION, recibo.getBlockNumber().longValueExact(),
                 recibo.getTransactionHash()));
+    }
+
+    @Test
+    void decodificaLasRespuestasDeLasEmpresas() throws Exception {
+        var relayer = new ar.libroabierto.anchoring.infrastructure.Web3jAnclajeDeRespuestas(anvil.web3j(),
+                AnvilLocal.RELAYER, contrato, AnvilLocal.CHAIN_ID);
+        String hash = "0x" + "3".repeat(64);
+        var recibo = anvil.esperarRecibo(relayer.registrarRespuesta(2, hash, "bafy-respuesta"));
+
+        assertThat(fuente.respuestasRegistradas(0, fuente.bloqueActual())).containsExactly(
+                new EventoRespuestaRegistrada(2, hash, "bafy-respuesta", recibo.getBlockNumber().longValueExact(),
+                        recibo.getTransactionHash()));
     }
 
     @Test

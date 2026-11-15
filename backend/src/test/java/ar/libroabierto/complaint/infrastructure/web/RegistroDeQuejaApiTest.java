@@ -58,9 +58,10 @@ class RegistroDeQuejaApiTest {
     // Sin @Transactional en la clase: cada pedido confirma su transacción como en producción, y se limpia a mano.
     @BeforeEach
     void usuarios() {
+        jdbc.update("DELETE FROM respuesta");
         jdbc.update("DELETE FROM queja");
-        jdbc.update("DELETE FROM empresa");
         jdbc.update("DELETE FROM usuario");
+        jdbc.update("DELETE FROM empresa");
         ciudadano = usuario("ciudadana@example.test", "CIUDADANO", true);
     }
 
