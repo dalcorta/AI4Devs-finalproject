@@ -4,6 +4,8 @@ import { join } from "node:path";
 // Puertos propios de los E2E: no chocan con un backend (8081) o un frontend (3000) de desarrollo abiertos.
 export const PUERTO_FRONTEND = 13000;
 export const PUERTO_BACKEND = 18081;
+/** Ollama falso (e2e/ollama-falso.mjs) para la detección de datos personales de HU-06. */
+export const PUERTO_OLLAMA = 11500;
 export const FRONTEND_URL = `http://127.0.0.1:${PUERTO_FRONTEND}`;
 export const BACKEND_URL = `http://127.0.0.1:${PUERTO_BACKEND}`;
 

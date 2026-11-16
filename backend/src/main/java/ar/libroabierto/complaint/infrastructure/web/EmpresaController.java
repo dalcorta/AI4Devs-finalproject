@@ -3,6 +3,7 @@ package ar.libroabierto.complaint.infrastructure.web;
 import ar.libroabierto.complaint.application.ConsultasDeEmpresa;
 import ar.libroabierto.complaint.application.ConsultasPublicas;
 import ar.libroabierto.complaint.application.DatosInvalidosException;
+import ar.libroabierto.complaint.application.DatosPersonalesDetectadosException;
 import ar.libroabierto.complaint.application.QuejaNoEncontradaException;
 import ar.libroabierto.complaint.application.ResponderQueja;
 import ar.libroabierto.complaint.application.RespuestaNoDisponibleException;
@@ -41,7 +42,7 @@ class EmpresaController {
     record Bandeja(ConsultasPublicas.EmpresaResumen empresa, List<ConsultasDeEmpresa.QuejaRecibida> items) {
     }
 
-    record RespuestaRequest(String texto) {
+    record RespuestaRequest(String texto, boolean confirmarDatosPersonales) {
     }
 
     record RespuestaCreada(UUID id) {
@@ -64,7 +65,8 @@ class EmpresaController {
     ResponseEntity<RespuestaCreada> responder(@AuthenticationPrincipal Jwt token, @PathVariable UUID id,
             @RequestBody RespuestaRequest pedido) {
         // Quién responde (y por qué empresa) sale del token firmado, nunca del cuerpo del pedido.
-        UUID respuesta = responder.ejecutar(UUID.fromString(token.getSubject()), id, pedido.texto());
+        UUID respuesta = responder.ejecutar(UUID.fromString(token.getSubject()), id, pedido.texto(),
+                pedido.confirmarDatosPersonales());
         return ResponseEntity.accepted().body(new RespuestaCreada(respuesta));
     }
 
@@ -76,6 +78,11 @@ class EmpresaController {
     @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class})
     ResponseEntity<Map<String, Object>> pedidoIlegible(Exception e) {
         return ResponseEntity.badRequest().body(Map.of("mensaje", "El pedido tiene un valor no válido"));
+    }
+
+    @ExceptionHandler(DatosPersonalesDetectadosException.class)
+    ResponseEntity<Map<String, Object>> datosPersonales(DatosPersonalesDetectadosException e) {
+        return AvisoDeDatosPersonales.respuesta(e);
     }
 
     @ExceptionHandler(QuejaNoEncontradaException.class)

@@ -88,9 +88,9 @@ _Pendiente (Entrega 2 / final): capturas y video del recorrido completo._
 Pantallas previstas:
 - `/` — buscador por CUIT o razón social.
 - `/empresas/{cuit}` — listado público de quejas con badge de verificación.
-- `/quejas/nueva` — formulario de queja (requiere login de ciudadano).
+- `/quejas/nueva` — formulario de queja (requiere login de ciudadano); antes de publicar avisa si la descripción parece tener datos personales (HU-06).
 - `/quejas/{id}` — detalle público con historial de estados, enlaces a las transacciones y la respuesta de la empresa verificada.
-- `/login` — ingreso del funcionario y de los representantes de empresa; cada rol va a su panel.
+- `/login` — ingreso de ciudadanos, funcionarios y representantes de empresa; cada rol va a su página.
 - `/panel` — bandeja del funcionario ordenada por prioridad.
 - `/empresa` — quejas recibidas por la empresa, con el formulario de respuesta pública (should-have).
 
@@ -100,7 +100,7 @@ _Pendiente (Entrega 2)._ Se prevé un único comando:
 
 ```bash
 cp .env.example .env
-docker compose up -d   # postgres, ipfs (kubo), anvil, ollama, backend, frontend
+docker compose up -d   # postgres, ipfs (kubo), anvil; con --profile pii, también ollama (HU-06)
 make deploy-contract   # despliega ComplaintRegistry en la cadena local
 make seed              # usuarios y empresas de prueba
 ```
@@ -176,7 +176,7 @@ flowchart LR
 | Base de datos | PostgreSQL 16, Flyway | Datos de usuarios, quejas, triage, historial de estados y checkpoint del listener. |
 | Almacenamiento público | IPFS (Kubo en local, Pinata en despliegue) | Documento JSON público de cada queja y evidencias públicas. |
 | LLM (triage) | Proveedor por API en el despliegue (texto ya público, tras confirmar on-chain) | Clasifica, resume y prioriza. Solo procesa el **texto público** de la queja, nunca datos personales. |
-| LLM (detección de PII, should-have) | Ollama local, siempre, sin importar el proveedor del triage | HU-06: analiza la descripción **antes** de publicarla, cuando todavía no es pública; por eso corre siempre en local y nunca contra un proveedor externo. |
+| Detección de datos personales (should-have) | Patrones deterministas + Ollama local (`qwen2.5:1.5b` por defecto), siempre, sin importar el proveedor del triage | HU-06: revisa la descripción de la queja y el texto de la respuesta de la empresa **antes** de guardarlos, cuando todavía no son públicos; por eso el modelo corre siempre en local y la aplicación no arranca si su URL apunta fuera de la máquina o de la red privada. |
 | Mock organismo (should-have) | Módulo Spring | Simula la recepción de un expediente y devuelve un número de trámite. |
 
 ### **2.3. Descripción de alto nivel del proyecto y estructura de ficheros**
@@ -231,6 +231,7 @@ El backend sigue una **arquitectura hexagonal** por módulo: el dominio no conoc
 - **Clave privada del relayer** gestionada por variable de entorno o secret manager, nunca en el código. El rol `RELAYER_ROLE` solo permite **agregar** registros.
 - **Control de acceso por roles** (CIUDADANO, FUNCIONARIO, EMPRESA) en la API y en el contrato (`OFFICER_ROLE` para cambios de estado).
 - **Validación de entrada** (Bean Validation, validación de CUIT con dígito verificador, límites de tamaño de texto y archivos).
+- **Detección de datos personales antes de publicar (HU-06):** patrones para DNI, CUIL, email, teléfono, tarjeta y CBU, y un modelo local (Ollama) para nombres de personas. Si el modelo no responde, se avisa igual y el autor confirma; nunca se da por limpio un texto que no se pudo revisar.
 - **Mitigación de prompt injection:** el texto del usuario va delimitado como dato; la salida del LLM se valida contra un JSON Schema y se descarta si no cumple. El LLM no tiene herramientas ni acceso a datos privados.
 - **Anti-spam:** límite de quejas por usuario por día y rate limiting por IP.
 - **Datos de prueba:** el entorno de evaluación usa CUITs y personas ficticias.
@@ -506,6 +507,10 @@ paths:
                 descripcion: { type: string, maxLength: 5000 }
                 montoReclamado: { type: number, minimum: 0 }
                 fechaHecho: { type: string, format: date }
+                confirmarDatosPersonales:
+                  type: boolean
+                  default: false
+                  description: El ciudadano ya vio el aviso de HU-06 y publica la descripción tal cual
       responses:
         '202':
           description: Queja aceptada; el anclaje on-chain es asíncrono
@@ -519,6 +524,13 @@ paths:
         '400': { description: Datos inválidos (p. ej. CUIT con dígito verificador incorrecto) }
         '401': { description: No autenticado }
         '403': { description: El usuario no es un ciudadano con identidad verificada }
+        '422':
+          description: >-
+            HU-06: la descripción parece tener datos personales, o el modelo local no pudo revisarla, y no se confirmó.
+            No se guarda nada; se reenvía corregida o con confirmarDatosPersonales en true
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvisoDeDatosPersonales' }
         '429': { description: Límite diario de quejas alcanzado }
 
   /api/quejas/{id}:
@@ -729,6 +741,7 @@ paths:
               required: [texto]
               properties:
                 texto: { type: string, minLength: 1, maxLength: 3000 }
+                confirmarDatosPersonales: { type: boolean, default: false }
       responses:
         '202':
           description: Respuesta aceptada; publicación en IPFS y anclaje on-chain en curso
@@ -742,10 +755,37 @@ paths:
         '403': { description: El usuario no tiene rol EMPRESA o no representa a la empresa denunciada }
         '404': { description: Queja no encontrada }
         '409': { description: La queja todavía no está anclada on-chain, o ya tiene una respuesta }
+        '422':
+          description: HU-06, igual que al registrar una queja (campo texto)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvisoDeDatosPersonales' }
 
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    AvisoDeDatosPersonales:
+      type: object
+      properties:
+        mensaje: { type: string }
+        datosPersonales:
+          type: object
+          properties:
+            campo: { type: string, enum: [descripcion, texto] }
+            revisionCompleta:
+              type: boolean
+              description: false si el modelo local no respondió y solo se revisaron los patrones
+            hallazgos:
+              type: array
+              description: Fragmentos del mismo texto enviado, para que el autor los encuentre; no se guardan
+              items:
+                type: object
+                properties:
+                  tipo: { type: string, enum: [NOMBRE, DNI, CUIL, EMAIL, TELEFONO, TARJETA, CBU] }
+                  fragmento: { type: string }
+                  inicio: { type: integer, description: Posición en el texto sin espacios al principio ni al final }
+                  fin: { type: integer, description: Posición final, exclusiva }
 ```
 
 ---
@@ -808,8 +848,12 @@ Criterios de aceptación:
   - Solo responde un representante de la empresa denunciada, una sola vez por queja (lo exigen la base y el contrato), y solo cuando la queja ya está anclada; el derecho a responder no vence con el estado de la queja.
   - La firma on-chain la hace el relayer; el documento público referencia el id y el hash on-chain de la queja y no lleva quién respondió.
   - La vista pública muestra la respuesta solo si su contenido se verifica en el navegador contra el contrato. La cadena manda: una respuesta anclada se muestra aunque el backend diga que no hay.
-  - El formulario advierte que la respuesta es pública y permanente y que no debe incluir datos personales del consumidor. **Limitación conocida:** hasta HU-06 no hay detección automática; cuando exista, se aplicará también a las respuestas.
+  - El formulario advierte que la respuesta es pública y permanente y que no debe incluir datos personales del consumidor. Desde HU-06, el texto pasa por la misma detección de datos personales que la descripción de una queja.
 - **HU-06 — Detección de datos personales:** antes de publicar, el LLM analiza la descripción y, si detecta datos personales, avisa al ciudadano y le pide que los quite o confirme. Esta verificación corre **siempre con un modelo local (Ollama)**, nunca contra el proveedor por API usado para el triage post-publicación: en este punto la descripción todavía no es pública, así que no puede salir del backend.
+  - Los datos con formato fijo (DNI, CUIL de persona, email, teléfono, tarjeta con Luhn, CBU) los encuentran patrones deterministas; el modelo local busca nombres de personas. Un nombre que el modelo devuelve y no aparece literalmente en el texto se descarta.
+  - Si hay hallazgos y el autor no confirmó, la API responde 422 con cada fragmento y su posición, y no guarda nada. El autor corrige el texto o lo reenvía confirmando.
+  - Si el modelo local no responde, los patrones corren igual y el 422 indica que la revisión quedó incompleta: el autor tiene que confirmar aunque no haya hallazgos.
+  - Se aplica también a la respuesta de la empresa (HU-05).
 
 ---
 
@@ -881,6 +925,17 @@ Criterios de aceptación:
   - Historial de estados con enlace al explorador de bloques.
   - Diseño responsive y estados de carga y error.
 - **Criterios de aceptación:** test unitario de `verify.ts` con los mismos vectores que el backend; test E2E que manipula el contenido servido y comprueba que aparece "Integridad comprometida".
+
+**Ticket 7 — [Backend / IA] Detección de datos personales antes de publicar**
+
+- **Tipo:** Backend / IA / Frontend · **HU:** HU-06, HU-05 · **Estimación:** 5 pts
+- **Descripción:** revisar la descripción de la queja y el texto de la respuesta de la empresa antes de guardarlos, con patrones deterministas y un modelo local, y avisar al autor.
+- **Tareas:**
+  - Módulo `privacidad`: `DetectorDePatrones`, el puerto `ModeloLocal` con el adaptador `OllamaModeloLocal` (`/api/chat`, sin streaming, el JSON Schema como `format`, temperatura 0) y `RevisarDatosPersonales`, que valida la salida del modelo contra `privacidad/salida-nombres.schema.json` y ubica cada nombre en el texto.
+  - `RegistrarQueja` y `ResponderQueja` revisan el texto si el pedido no trae `confirmarDatosPersonales`, después de las demás validaciones; la API responde 422 con los hallazgos.
+  - `PrivacidadConfig` no arranca si `PII_OLLAMA_URL` apunta fuera de la máquina o de la red privada; con `PII_LLM_HABILITADO=false`, solo patrones y confirmación obligatoria.
+  - Frontend: formulario `/quejas/nueva` y aviso con "Corregir el texto" y "Publicar igual", también en el formulario de respuesta de la empresa.
+- **Criterios de aceptación:** tests unitarios de cada patrón (incluidos montos que no son DNI y CUIT de empresa que no es dato personal); un nombre inventado por el modelo se descarta; con el modelo caído se pide confirmación; test del adaptador contra un servidor HTTP local que imita Ollama; test HTTP del 422 y de la confirmación; E2E donde la ciudadana ve el aviso, corrige el texto y la queja termina verificada.
 
 ---
 

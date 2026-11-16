@@ -6,6 +6,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import ar.libroabierto.complaint.domain.AnchorStatus;
 import ar.libroabierto.complaint.domain.Empresa;
 import ar.libroabierto.complaint.domain.Queja;
+import ar.libroabierto.privacidad.application.ModeloLocalNoDisponibleException;
+import ar.libroabierto.privacidad.application.RevisarDatosPersonales;
+import ar.libroabierto.privacidad.domain.Hallazgo;
+import ar.libroabierto.privacidad.domain.TipoDatoPersonal;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -32,6 +36,10 @@ class RegistrarQuejaTest {
     private EmpresasEnMemoria empresas;
     private RegistroEnMemoria registro;
     private RegistrarQueja registrar;
+    private RevisarDatosPersonales revisor;
+    private String salidaDelModelo = "{\"nombres\": []}";
+    private boolean modeloCaido;
+    private int consultasAlModelo;
 
     @BeforeEach
     void setUp() {
@@ -40,7 +48,15 @@ class RegistrarQuejaTest {
         empresas = new EmpresasEnMemoria();
         empresas.agregar(new Empresa(CUIT_EXISTENTE, "Banco de la Nación Argentina"));
         registro = new RegistroEnMemoria();
-        registrar = new RegistrarQueja(denunciantes, empresas, registro, Clock.fixed(AHORA, ZoneOffset.UTC));
+        revisor = new RevisarDatosPersonales(solicitud -> {
+            consultasAlModelo++;
+            if (modeloCaido) {
+                throw new ModeloLocalNoDisponibleException("Ollama no respondió", null);
+            }
+            return salidaDelModelo;
+        });
+        registrar = new RegistrarQueja(denunciantes, empresas, registro, revisor,
+                Clock.fixed(AHORA, ZoneOffset.UTC));
     }
 
     @Test
@@ -98,7 +114,7 @@ class RegistrarQuejaTest {
     void laFechaDelHechoPuedeSerHoyEnArgentinaAunqueEnUtcSeaManana() {
         // 23:30 del 12/11 en Buenos Aires ya es 13/11 en UTC.
         Clock tarde = Clock.fixed(Instant.parse("2026-11-13T02:30:00Z"), ZoneOffset.UTC);
-        RegistrarQueja deNoche = new RegistrarQueja(denunciantes, empresas, registro, tarde);
+        RegistrarQueja deNoche = new RegistrarQueja(denunciantes, empresas, registro, revisor, tarde);
 
         deNoche.ejecutar(new NuevaQueja(ciudadano, CUIT_EXISTENTE, null, "bancos", "Cobro indebido.", null,
                 LocalDate.parse("2026-11-12")));
@@ -152,6 +168,66 @@ class RegistrarQuejaTest {
 
         // 00:00 del 12/11 en Buenos Aires = 03:00 UTC.
         assertThat(registro.consultasDesde).containsExactly(Instant.parse("2026-11-12T03:00:00Z"));
+    }
+
+    @Test
+    void unaDescripcionConDatosPersonalesSinConfirmarNoSeRegistraYDevuelveLosHallazgos() {
+        salidaDelModelo = "{\"nombres\": [\"Juan Pérez\"]}";
+        String descripcion = "Me atendió Juan Pérez y le di mi DNI 30.123.456.";
+
+        assertThatThrownBy(() -> registrar.ejecutar(conDescripcion(descripcion, false)))
+                .isInstanceOfSatisfying(DatosPersonalesDetectadosException.class, e -> {
+                    assertThat(e.campo()).isEqualTo("descripcion");
+                    assertThat(e.revision().completa()).isTrue();
+                    assertThat(e.revision().hallazgos()).extracting(Hallazgo::tipo)
+                            .containsExactly(TipoDatoPersonal.NOMBRE, TipoDatoPersonal.DNI);
+                    // El mensaje de la excepción puede terminar en un log: nunca lleva el texto detectado.
+                    assertThat(e.getMessage()).doesNotContain("Juan", "30.123.456");
+                });
+        assertThat(registro.quejas).isEmpty();
+    }
+
+    @Test
+    void siElCiudadanoConfirmaSeRegistraTalCualSinVolverAConsultarAlModelo() {
+        String descripcion = "Me atendió Juan Pérez y le di mi DNI 30.123.456.";
+
+        registrar.ejecutar(conDescripcion(descripcion, true));
+
+        assertThat(registro.quejas).extracting(Queja::descripcion).containsExactly(descripcion);
+        assertThat(consultasAlModelo).isZero();
+    }
+
+    @Test
+    void conElModeloLocalCaidoHayQueConfirmarAunqueNoAparezcanDatos() {
+        modeloCaido = true;
+
+        assertThatThrownBy(() -> registrar.ejecutar(conDescripcion("Me cobraron dos veces.", false)))
+                .isInstanceOfSatisfying(DatosPersonalesDetectadosException.class, e -> {
+                    assertThat(e.revision().completa()).isFalse();
+                    assertThat(e.revision().hallazgos()).isEmpty();
+                });
+        assertThat(registro.quejas).isEmpty();
+
+        registrar.ejecutar(conDescripcion("Me cobraron dos veces.", true));
+        assertThat(registro.quejas).hasSize(1);
+    }
+
+    @Test
+    void laRevisionCorreSobreElTextoYaValidadoYDespuesDelLimiteDiario() {
+        assertThatThrownBy(() -> registrar.ejecutar(conDescripcion(" ", false)))
+                .isInstanceOf(DatosInvalidosException.class);
+        for (int i = 0; i < 5; i++) {
+            registrar.ejecutar(nueva(CUIT_EXISTENTE, null));
+        }
+        int antes = consultasAlModelo;
+        assertThatThrownBy(() -> registrar.ejecutar(nueva(CUIT_EXISTENTE, null)))
+                .isInstanceOf(LimiteDiarioAlcanzadoException.class);
+        assertThat(consultasAlModelo).isEqualTo(antes);
+    }
+
+    private NuevaQueja conDescripcion(String descripcion, boolean confirmar) {
+        return new NuevaQueja(ciudadano, CUIT_EXISTENTE, null, "bancos", descripcion, null,
+                LocalDate.parse("2026-11-01"), confirmar);
     }
 
     private NuevaQueja nueva(String cuit, String razonSocial) {

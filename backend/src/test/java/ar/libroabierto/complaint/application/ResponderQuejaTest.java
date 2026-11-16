@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import ar.libroabierto.complaint.domain.AnchorStatus;
+import ar.libroabierto.privacidad.application.RevisarDatosPersonales;
+import ar.libroabierto.privacidad.domain.TipoDatoPersonal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -25,18 +27,23 @@ class ResponderQuejaTest {
     private final UUID queja = UUID.randomUUID();
     private RespuestasEnMemoria respuestas;
     private ResponderQueja responder;
+    private int consultasAlModelo;
 
     @BeforeEach
     void setUp() {
         respuestas = new RespuestasEnMemoria();
         respuestas.empresas.put(representante, empresa);
         respuestas.situaciones.put(queja, new Respuestas.Situacion(empresa, AnchorStatus.CONFIRMADA, false));
-        responder = new ResponderQueja(respuestas, Clock.fixed(AHORA, ZoneOffset.UTC));
+        RevisarDatosPersonales revisor = new RevisarDatosPersonales(solicitud -> {
+            consultasAlModelo++;
+            return "{\"nombres\": []}";
+        });
+        responder = new ResponderQueja(respuestas, revisor, Clock.fixed(AHORA, ZoneOffset.UTC));
     }
 
     @Test
     void registraLaRespuestaConSuAutorYElTextoSinEspaciosSobrantes() {
-        UUID id = responder.ejecutar(representante, queja, "  Ya restablecimos el servicio.  ");
+        UUID id = responder.ejecutar(representante, queja, "  Ya restablecimos el servicio.  ", false);
 
         assertThat(respuestas.registradas).containsExactly(
                 new Respuestas.NuevaRespuesta(id, queja, representante, "Ya restablecimos el servicio.", AHORA));
@@ -44,18 +51,18 @@ class ResponderQuejaTest {
 
     @Test
     void unTextoVacioODemasiadoLargoEsInvalido() {
-        assertThatThrownBy(() -> responder.ejecutar(representante, queja, "   "))
+        assertThatThrownBy(() -> responder.ejecutar(representante, queja, "   ", false))
                 .isInstanceOf(DatosInvalidosException.class);
-        assertThatThrownBy(() -> responder.ejecutar(representante, queja, null))
+        assertThatThrownBy(() -> responder.ejecutar(representante, queja, null, false))
                 .isInstanceOf(DatosInvalidosException.class);
-        assertThatThrownBy(() -> responder.ejecutar(representante, queja, "x".repeat(ResponderQueja.MAX_TEXTO + 1)))
+        assertThatThrownBy(() -> responder.ejecutar(representante, queja, "x".repeat(ResponderQueja.MAX_TEXTO + 1), false))
                 .isInstanceOf(DatosInvalidosException.class);
-        assertThat(responder.ejecutar(representante, queja, "x".repeat(ResponderQueja.MAX_TEXTO))).isNotNull();
+        assertThat(responder.ejecutar(representante, queja, "x".repeat(ResponderQueja.MAX_TEXTO), false)).isNotNull();
     }
 
     @Test
     void unaQuejaInexistenteEsNoEncontrada() {
-        assertThatThrownBy(() -> responder.ejecutar(representante, UUID.randomUUID(), "Texto"))
+        assertThatThrownBy(() -> responder.ejecutar(representante, UUID.randomUUID(), "Texto", false))
                 .isInstanceOf(QuejaNoEncontradaException.class);
     }
 
@@ -64,9 +71,9 @@ class ResponderQuejaTest {
         UUID deOtraEmpresa = UUID.randomUUID();
         respuestas.empresas.put(deOtraEmpresa, UUID.randomUUID());
 
-        assertThatThrownBy(() -> responder.ejecutar(deOtraEmpresa, queja, "Texto"))
+        assertThatThrownBy(() -> responder.ejecutar(deOtraEmpresa, queja, "Texto", false))
                 .isInstanceOf(RespuestaNoPermitidaException.class);
-        assertThatThrownBy(() -> responder.ejecutar(UUID.randomUUID(), queja, "Texto"))
+        assertThatThrownBy(() -> responder.ejecutar(UUID.randomUUID(), queja, "Texto", false))
                 .isInstanceOf(RespuestaNoPermitidaException.class);
         assertThat(respuestas.registradas).isEmpty();
     }
@@ -75,7 +82,7 @@ class ResponderQuejaTest {
     void unaQuejaSinAnclarTodaviaNoSePuedeResponder() {
         respuestas.situaciones.put(queja, new Respuestas.Situacion(empresa, AnchorStatus.ENVIADA, false));
 
-        assertThatThrownBy(() -> responder.ejecutar(representante, queja, "Texto"))
+        assertThatThrownBy(() -> responder.ejecutar(representante, queja, "Texto", false))
                 .isInstanceOf(RespuestaNoDisponibleException.class);
     }
 
@@ -83,7 +90,7 @@ class ResponderQuejaTest {
     void hayUnaSolaRespuestaPorQueja() {
         respuestas.situaciones.put(queja, new Respuestas.Situacion(empresa, AnchorStatus.CONFIRMADA, true));
 
-        assertThatThrownBy(() -> responder.ejecutar(representante, queja, "Texto"))
+        assertThatThrownBy(() -> responder.ejecutar(representante, queja, "Texto", false))
                 .isInstanceOf(RespuestaNoDisponibleException.class);
         assertThat(respuestas.registradas).isEmpty();
     }
@@ -92,8 +99,38 @@ class ResponderQuejaTest {
     void siOtraRespuestaSeGuardoEnElMedioTambienEsUnConflicto() {
         respuestas.rechazar = true;
 
-        assertThatThrownBy(() -> responder.ejecutar(representante, queja, "Texto"))
+        assertThatThrownBy(() -> responder.ejecutar(representante, queja, "Texto", false))
                 .isInstanceOf(RespuestaNoDisponibleException.class);
+    }
+
+    @Test
+    void unaRespuestaConDatosDelConsumidorSinConfirmarNoSeRegistra() {
+        assertThatThrownBy(() -> responder.ejecutar(representante, queja,
+                "Contactamos al cliente al 11 4567-8901 y le reintegramos el cargo.", false))
+                .isInstanceOfSatisfying(DatosPersonalesDetectadosException.class, e -> {
+                    assertThat(e.campo()).isEqualTo("texto");
+                    assertThat(e.revision().hallazgos()).extracting(h -> h.tipo())
+                            .containsExactly(TipoDatoPersonal.TELEFONO);
+                });
+        assertThat(respuestas.registradas).isEmpty();
+    }
+
+    @Test
+    void confirmandoSeRegistraSinConsultarAlModelo() {
+        responder.ejecutar(representante, queja, "Le escribimos a cliente@example.com.", true);
+
+        assertThat(respuestas.registradas).hasSize(1);
+        assertThat(consultasAlModelo).isZero();
+    }
+
+    @Test
+    void laRevisionCorreRecienCuandoLaEmpresaPuedeResponder() {
+        UUID deOtraEmpresa = UUID.randomUUID();
+        respuestas.empresas.put(deOtraEmpresa, UUID.randomUUID());
+
+        assertThatThrownBy(() -> responder.ejecutar(deOtraEmpresa, queja, "Texto", false))
+                .isInstanceOf(RespuestaNoPermitidaException.class);
+        assertThat(consultasAlModelo).isZero();
     }
 
     static class RespuestasEnMemoria implements Respuestas {

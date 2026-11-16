@@ -1,6 +1,7 @@
 package ar.libroabierto.complaint.infrastructure.web;
 
 import ar.libroabierto.complaint.application.DatosInvalidosException;
+import ar.libroabierto.complaint.application.DatosPersonalesDetectadosException;
 import ar.libroabierto.complaint.application.DenuncianteNoHabilitadoException;
 import ar.libroabierto.complaint.application.LimiteDiarioAlcanzadoException;
 import java.util.Map;
@@ -27,6 +28,11 @@ class ErroresDeQuejas {
     @ExceptionHandler(DenuncianteNoHabilitadoException.class)
     ResponseEntity<Map<String, Object>> noHabilitado(DenuncianteNoHabilitadoException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("mensaje", e.getMessage()));
+    }
+
+    @ExceptionHandler(DatosPersonalesDetectadosException.class)
+    ResponseEntity<Map<String, Object>> datosPersonales(DatosPersonalesDetectadosException e) {
+        return AvisoDeDatosPersonales.respuesta(e);
     }
 
     @ExceptionHandler(LimiteDiarioAlcanzadoException.class)

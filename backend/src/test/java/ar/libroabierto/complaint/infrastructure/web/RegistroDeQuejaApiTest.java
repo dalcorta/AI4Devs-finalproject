@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ar.libroabierto.PostgresTestcontainer;
+import ar.libroabierto.support.ModeloLocalDeTest.ModeloLocalFalso;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.JWSAlgorithm;
@@ -50,6 +51,9 @@ class RegistroDeQuejaApiTest {
     @Autowired
     private JdbcTemplate jdbc;
 
+    @Autowired
+    private ModeloLocalFalso modelo;
+
     private final ObjectMapper json = new ObjectMapper();
     private final String hash = new BCryptPasswordEncoder().encode(CLAVE);
 
@@ -63,6 +67,7 @@ class RegistroDeQuejaApiTest {
         jdbc.update("DELETE FROM usuario");
         jdbc.update("DELETE FROM empresa");
         ciudadano = usuario("ciudadana@example.test", "CIUDADANO", true);
+        modelo.reiniciar();
     }
 
     @Test
@@ -183,6 +188,53 @@ class RegistroDeQuejaApiTest {
         assertThat(cantidadDeQuejas()).isEqualTo(5);
     }
 
+    @Test
+    void unaDescripcionConDatosPersonalesDevuelve422ConLosHallazgosYNoCreaLaQueja() throws Exception {
+        modelo.encontrar("Juan Pérez");
+        String descripcion = "Me atendió Juan Pérez; mi DNI es 30.123.456.";
+
+        mvc.perform(post("/api/quejas").header("Authorization", "Bearer " + login())
+                        .contentType(MediaType.APPLICATION_JSON).content(queja(descripcion, null)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.mensaje").isNotEmpty())
+                .andExpect(jsonPath("$.datosPersonales.campo").value("descripcion"))
+                .andExpect(jsonPath("$.datosPersonales.revisionCompleta").value(true))
+                .andExpect(jsonPath("$.datosPersonales.hallazgos.length()").value(2))
+                .andExpect(jsonPath("$.datosPersonales.hallazgos[0].tipo").value("NOMBRE"))
+                .andExpect(jsonPath("$.datosPersonales.hallazgos[0].fragmento").value("Juan Pérez"))
+                .andExpect(jsonPath("$.datosPersonales.hallazgos[0].inicio").value(11))
+                .andExpect(jsonPath("$.datosPersonales.hallazgos[0].fin").value(21))
+                .andExpect(jsonPath("$.datosPersonales.hallazgos[1].tipo").value("DNI"));
+
+        assertThat(cantidadDeQuejas()).isZero();
+    }
+
+    @Test
+    void confirmandoLosDatosPersonalesLaQuejaSeRegistra() throws Exception {
+        modelo.encontrar("Juan Pérez");
+
+        mvc.perform(post("/api/quejas").header("Authorization", "Bearer " + login())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(queja("Me atendió Juan Pérez.", true)))
+                .andExpect(status().isAccepted());
+
+        assertThat(cantidadDeQuejas()).isOne();
+        assertThat(modelo.consultas()).isZero();
+    }
+
+    @Test
+    void conElModeloLocalCaidoDevuelve422IndicandoQueLaRevisionQuedoIncompleta() throws Exception {
+        modelo.caer();
+
+        mvc.perform(post("/api/quejas").header("Authorization", "Bearer " + login())
+                        .contentType(MediaType.APPLICATION_JSON).content(quejaValida("30712345671")))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.datosPersonales.revisionCompleta").value(false))
+                .andExpect(jsonPath("$.datosPersonales.hallazgos.length()").value(0));
+
+        assertThat(cantidadDeQuejas()).isZero();
+    }
+
     private String login() throws Exception {
         return login("ciudadana@example.test");
     }
@@ -213,6 +265,16 @@ class RegistroDeQuejaApiTest {
                 {"cuitEmpresa": "%s", "razonSocial": "Empresa Ficticia S.A.", "categoria": "telecomunicaciones",
                  "descripcion": "Corte de servicio de internet durante 15 días.", "montoReclamado": 15000,
                  "fechaHecho": "2026-10-15"}""".formatted(cuit);
+    }
+
+    private static String queja(String descripcion, Boolean confirmar) throws Exception {
+        Map<String, Object> cuerpo = new java.util.LinkedHashMap<>(Map.of("cuitEmpresa", "30712345671",
+                "razonSocial", "Empresa Ficticia S.A.", "categoria", "telecomunicaciones",
+                "descripcion", descripcion, "fechaHecho", "2026-10-15"));
+        if (confirmar != null) {
+            cuerpo.put("confirmarDatosPersonales", confirmar);
+        }
+        return new ObjectMapper().writeValueAsString(cuerpo);
     }
 
     private static String token(String secreto, UUID usuario, String rol) throws Exception {

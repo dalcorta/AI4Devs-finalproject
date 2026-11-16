@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Nombres de personas encontrados en un texto (HU-06)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["nombres"],
+  "properties": {
+    "nombres": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {"type": "string", "maxLength": 120}
+    }
+  }
+}

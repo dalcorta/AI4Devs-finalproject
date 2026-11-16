@@ -635,3 +635,34 @@ Resultado:
    - dos restricciones probadas en una misma transacción (la primera la aborta), separadas en dos tests;
    - el test de migraciones no conocía la V4;
    - en E2E, el detalle ahora tiene dos badges (queja y respuesta). Se le dio una región propia a la verificación de la queja y se acotaron las comprobaciones viejas a esa región.
+
+## Implementación — Detección de datos personales antes de publicar (HU-06) (Claude Code)
+
+**Prompt**
+```
+HU-06 local PII detection
+```
+
+HU-06 no tenía ticket, solo la historia ("el LLM analiza la descripción... siempre con un modelo local"). Además, el frontend no tenía formulario de queja para el ciudadano. Claude planteó cuatro decisiones y se eligió:
+- **Detector:** patrones deterministas para lo que tiene formato fijo (DNI, CUIL, email, teléfono, tarjeta, CBU) y el modelo local (Ollama) solo para nombres de personas. Lo estructurado no depende de que un modelo chico acierte, y los tests no dependen del modelo.
+- **Flujo:** la revisión corre al enviar. Si hay hallazgos y el pedido no confirma, 422 con los hallazgos y no se guarda nada; el autor corrige o reenvía con `confirmarDatosPersonales`.
+- **Modelo caído:** los patrones corren igual y la revisión queda incompleta, así que el autor confirma aunque no haya hallazgos. Nunca se da por limpio un texto que no se pudo revisar.
+- **Frontend:** formulario `/quejas/nueva` con el aviso, y el mismo aviso en la respuesta de la empresa.
+
+Se escribió el Ticket 7 en el readme con esas decisiones antes de los tests.
+
+Resultado:
+- **Módulo `privacidad`:** `DetectorDePatrones`, `RevisarDatosPersonales`, el puerto `ModeloLocal` y el adaptador `OllamaModeloLocal`.
+  - La salida del modelo se trata como dato no confiable: se valida contra un JSON Schema y un nombre que no aparece literalmente en el texto se descarta.
+  - El texto va delimitado entre `<texto>` y `</texto>`, con `<` y `>` reemplazados para que no pueda cerrar la etiqueta.
+  - Ni el texto ni los hallazgos van a los logs; los errores del adaptador no incluyen el cuerpo de Ollama.
+- **Regla 2 de CLAUDE.md como chequeo de arranque:** `PrivacidadConfig` no arranca si `PII_OLLAMA_URL` apunta fuera de la máquina o de la red privada (un nombre con dominio no se resuelve: podría apuntar a cualquier lado).
+- **Casos de uso:** `RegistrarQueja` revisa la descripción después de validar y del límite diario (para no consultar al modelo de más); `ResponderQueja`, después de los chequeos de empresa y anclaje.
+- **Frontend:** `/quejas/nueva` (el login lleva ahí a los ciudadanos), un componente `AvisoDatosPersonales` con "Corregir el texto" y "Publicar igual", y el cliente de la API distingue el 422 de HU-06.
+- **Tests sin modelo real:** los tests con Spring usan un modelo falso compartido (`ModeloLocalDeTest`, importado por `PostgresTestcontainer` para no multiplicar contextos); el adaptador se prueba contra un servidor HTTP local que imita Ollama, y los E2E levantan `e2e/ollama-falso.mjs`.
+- **Resultados:** 310 tests de backend (0 omitidos), 59 unitarios de frontend y 14 E2E pasan; los 16 de contrato no cambiaron.
+
+**Verificación y ajustes humanos**
+1. **Garantías comprobadas rompiéndolas a propósito:** dar por completa una revisión con el modelo caído, aceptar un nombre que no está en el texto, no validar la salida contra el esquema, saltear la revisión al registrar o al responder, aceptar cualquier URL como local, tomar montos como DNI e incluir el cuerpo de Ollama en un error. Cada rotura hizo fallar su test.
+2. **Una mutación sobrevivió y cambió el diseño.** Quitar el chequeo del dígito verificador del CUIL no rompía ningún test. Al mirarlo, el chequeo era contraproducente: un CUIL mal tipeado no se avisaba, y lleva el DNI en el medio. Se escribió el test ("un CUIL mal tipeado igual se avisa"), falló, y se quitó el chequeo.
+3. **No probado con un modelo real:** Ollama no está instalado en esta máquina y todos los tests usan modelos falsos. Queda pendiente probar `qwen2.5:1.5b` con `docker compose --profile pii` y ajustar el prompt si hace falta.

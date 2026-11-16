@@ -46,6 +46,35 @@ export class NoAutorizado extends Error {}
 /** Un rechazo con motivo que el backend explica (409, 400, credenciales inválidas). */
 export class ErrorDeApi extends Error {}
 
+/** HU-06: un posible dato personal en el texto que se iba a publicar (posiciones del texto ya recortado). */
+export type Hallazgo = {
+  tipo: "NOMBRE" | "DNI" | "CUIL" | "EMAIL" | "TELEFONO" | "TARJETA" | "CBU";
+  fragmento: string;
+  inicio: number;
+  fin: number;
+};
+
+export type AvisoDeDatosPersonales = { campo: string; revisionCompleta: boolean; hallazgos: Hallazgo[] };
+
+/** 422 de HU-06: no se guardó nada; el autor quita los datos o reenvía confirmando. */
+export class DatosPersonalesDetectados extends ErrorDeApi {
+  constructor(
+    mensaje: string,
+    readonly aviso: AvisoDeDatosPersonales,
+  ) {
+    super(mensaje);
+  }
+}
+
+export type NuevaQueja = {
+  cuitEmpresa: string;
+  razonSocial: string | null;
+  categoria: string;
+  descripcion: string;
+  montoReclamado: number | null;
+  fechaHecho: string;
+};
+
 export type Sesion = { token: string; rol: "CIUDADANO" | "FUNCIONARIO" | "EMPRESA" };
 
 export type ItemDeBandeja = {
@@ -60,12 +89,27 @@ export type ItemDeBandeja = {
   createdAt: string;
 };
 
-async function motivo(respuesta: Response): Promise<string> {
+type CuerpoDeError = { mensaje?: string; errores?: Record<string, string>; datosPersonales?: AvisoDeDatosPersonales };
+
+async function cuerpoDeError(respuesta: Response): Promise<CuerpoDeError> {
   try {
-    const cuerpo = (await respuesta.json()) as { mensaje?: string };
-    return cuerpo.mensaje ?? `La API respondió ${respuesta.status}`;
+    return (await respuesta.json()) as CuerpoDeError;
   } catch {
-    return `La API respondió ${respuesta.status}`;
+    return {};
+  }
+}
+
+async function motivo(respuesta: Response): Promise<string> {
+  return (await cuerpoDeError(respuesta)).mensaje ?? `La API respondió ${respuesta.status}`;
+}
+
+/** Un rechazo por datos inválidos, con el motivo de cada campo para mostrarlo junto a él. */
+export class DatosInvalidos extends ErrorDeApi {
+  constructor(
+    mensaje: string,
+    readonly errores: Record<string, string>,
+  ) {
+    super(mensaje);
   }
 }
 
@@ -78,7 +122,15 @@ async function conSesion(ruta: string, token: string, init: RequestInit = {}): P
     throw new NoAutorizado(ruta);
   }
   if (!respuesta.ok) {
-    throw new ErrorDeApi(await motivo(respuesta));
+    const cuerpo = await cuerpoDeError(respuesta);
+    const mensaje = cuerpo.mensaje ?? `La API respondió ${respuesta.status}`;
+    if (respuesta.status === 422 && cuerpo.datosPersonales) {
+      throw new DatosPersonalesDetectados(mensaje, cuerpo.datosPersonales);
+    }
+    if (respuesta.status === 400 && cuerpo.errores) {
+      throw new DatosInvalidos(mensaje, cuerpo.errores);
+    }
+    throw new ErrorDeApi(mensaje);
   }
   return respuesta;
 }
@@ -129,11 +181,21 @@ export const api = {
     };
   },
 
-  async responder(token: string, id: string, texto: string): Promise<void> {
+  /** Devuelve el id de la queja. Con `confirmar`, se publica aunque parezca tener datos personales (HU-06). */
+  async registrarQueja(token: string, queja: NuevaQueja, confirmar: boolean): Promise<string> {
+    const respuesta = await conSesion("/api/quejas", token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...queja, confirmarDatosPersonales: confirmar }),
+    });
+    return ((await respuesta.json()) as { id: string }).id;
+  },
+
+  async responder(token: string, id: string, texto: string, confirmar = false): Promise<void> {
     await conSesion(`/api/quejas/${encodeURIComponent(id)}/respuesta`, token, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ texto }),
+      body: JSON.stringify({ texto, confirmarDatosPersonales: confirmar }),
     });
   },
 

@@ -120,3 +120,14 @@ form.respuesta-form textarea {
   background: var(--superficie); color: var(--texto); resize: vertical; }
 form.respuesta-form button { padding: 8px 12px; justify-self: start; }
 p.respuesta { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* HU-06: formulario de queja y aviso de datos personales */
+form.formulario.formulario-ancho { max-width: 560px; }
+form.formulario textarea, form.formulario select {
+  font: inherit; padding: 8px 10px; border: 1px solid var(--borde, #ccc); border-radius: 6px;
+}
+.error-campo { color: var(--error); font-size: 0.85rem; }
+.aviso-datos p { margin: 0 0 8px; }
+.aviso-datos ul.hallazgos { margin: 0 0 8px; padding-left: 20px; }
+.aviso-datos mark { padding: 0 2px; border-radius: 3px; }
+.aviso-datos .acciones { display: flex; flex-wrap: wrap; gap: 8px; }

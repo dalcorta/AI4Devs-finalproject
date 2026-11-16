@@ -5,7 +5,11 @@ import { type FormEvent, useState } from "react";
 import { api, ErrorDeApi, type Sesion } from "@/lib/api";
 import { guardarSesion } from "@/lib/sesion";
 
-const PANELES: Partial<Record<Sesion["rol"], string>> = { FUNCIONARIO: "/panel", EMPRESA: "/empresa" };
+const PANELES: Partial<Record<Sesion["rol"], string>> = {
+  CIUDADANO: "/quejas/nueva",
+  FUNCIONARIO: "/panel",
+  EMPRESA: "/empresa",
+};
 
 export default function Ingresar() {
   const router = useRouter();
@@ -20,10 +24,10 @@ export default function Ingresar() {
     setError(null);
     try {
       const sesion = await api.login(email, password);
-      // Cada rol tiene su panel; los ciudadanos todavía registran quejas solo por la API.
+      // Cada rol tiene su página: el ciudadano presenta quejas, el organismo y las empresas tienen su panel.
       const destino = PANELES[sesion.rol];
       if (!destino) {
-        setError("Por ahora este acceso es solo para el organismo y las empresas.");
+        setError("Este rol no tiene acceso desde el sitio.");
         return;
       }
       guardarSesion(sesion);
@@ -38,7 +42,9 @@ export default function Ingresar() {
   return (
     <>
       <h1>Ingresar</h1>
-      <p className="tenue">Acceso del organismo de defensa del consumidor y de las empresas.</p>
+      <p className="tenue">
+        Para presentar una queja, y para el organismo de defensa del consumidor y las empresas.
+      </p>
       <form className="formulario" onSubmit={ingresar}>
         <label>
           Email

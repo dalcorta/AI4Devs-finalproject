@@ -3,6 +3,8 @@ package ar.libroabierto.complaint.application;
 import ar.libroabierto.complaint.domain.Cuit;
 import ar.libroabierto.complaint.domain.Empresa;
 import ar.libroabierto.complaint.domain.Queja;
+import ar.libroabierto.privacidad.application.RevisarDatosPersonales;
+import ar.libroabierto.privacidad.application.Revision;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -32,13 +34,15 @@ public class RegistrarQueja {
     private final Denunciantes denunciantes;
     private final EmpresaRepository empresas;
     private final RegistroDeQuejas registro;
+    private final RevisarDatosPersonales revisor;
     private final Clock reloj;
 
     public RegistrarQueja(Denunciantes denunciantes, EmpresaRepository empresas, RegistroDeQuejas registro,
-            Clock reloj) {
+            RevisarDatosPersonales revisor, Clock reloj) {
         this.denunciantes = denunciantes;
         this.empresas = empresas;
         this.registro = registro;
+        this.revisor = revisor;
         this.reloj = reloj;
     }
 
@@ -65,6 +69,15 @@ public class RegistrarQueja {
 
         if (registro.registradasDesde(denunciante.id(), hoy.atStartOfDay(ZONA).toInstant()) >= LIMITE_DIARIO) {
             throw new LimiteDiarioAlcanzadoException(LIMITE_DIARIO);
+        }
+
+        // HU-06: lo último antes de guardar, porque consulta al modelo local. La descripción es lo único de la queja
+        // que se publica como texto libre.
+        if (!nueva.confirmarDatosPersonales()) {
+            Revision revision = revisor.revisar(descripcion);
+            if (revision.requiereConfirmacion()) {
+                throw new DatosPersonalesDetectadosException("descripcion", revision);
+            }
         }
 
         Queja queja = Queja.nueva(UUID.randomUUID(), denunciante.id(), empresa, categoria, descripcion,

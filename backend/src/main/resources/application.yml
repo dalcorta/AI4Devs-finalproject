@@ -42,6 +42,13 @@ libroabierto:
     lote: ${TRIAGE_LOTE:10}
     # Sin valor por defecto a propósito: con el triage habilitado, sin clave la aplicación no arranca.
     api-key: ${ANTHROPIC_API_KEY:}
+  privacidad:
+    # HU-06: el texto todavía no es público, así que el modelo es siempre local (Ollama). Con una URL fuera de la
+    # máquina o de la red privada la aplicación no arranca. Sin modelo, el autor confirma cada publicación.
+    llm-habilitado: ${PII_LLM_HABILITADO:true}
+    ollama-url: ${PII_OLLAMA_URL:http://127.0.0.1:11434}
+    modelo: ${PII_MODELO:qwen2.5:1.5b}
+    timeout: ${PII_TIMEOUT:PT20S}
   auth:
     # Sin valor por defecto a propósito: sin JWT_SECRET (32 bytes o más) la aplicación no arranca.
     jwt-secret: ${JWT_SECRET:}

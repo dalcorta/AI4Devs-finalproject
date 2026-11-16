@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ar.libroabierto.PostgresTestcontainer;
+import ar.libroabierto.support.ModeloLocalDeTest.ModeloLocalFalso;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Map;
 import java.util.UUID;
@@ -43,6 +44,9 @@ class RespuestaApiTest {
     @Autowired
     private JdbcTemplate jdbc;
 
+    @Autowired
+    private ModeloLocalFalso modelo;
+
     private final String hash = new BCryptPasswordEncoder().encode(CLAVE);
     private UUID ciudadano;
     private UUID empresa;
@@ -62,6 +66,7 @@ class RespuestaApiTest {
         otraEmpresa = empresa("30500010912", "Banco Ficticio S.A.");
         representante = usuario("representante@example.test", "EMPRESA", empresa);
         usuario("otra@example.test", "EMPRESA", otraEmpresa);
+        modelo.reiniciar();
     }
 
     @Test
@@ -162,6 +167,26 @@ class RespuestaApiTest {
                 .andReturn().getResponse().getContentAsString();
         // La empresa nunca ve quién se quejó.
         assertThat(cuerpo).doesNotContain(ciudadano.toString(), "ciudadana@", "Persona Ficticia");
+    }
+
+    @Test
+    void unaRespuestaConDatosDelConsumidorDevuelve422HastaQueLaEmpresaConfirme() throws Exception {
+        UUID queja = confirmada(empresa, "2026-10-01T10:00:00Z");
+        String texto = "Le reintegramos el cargo a la clienta, DNI 30.123.456.";
+
+        responder("representante@example.test", queja, texto)
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.datosPersonales.campo").value("texto"))
+                .andExpect(jsonPath("$.datosPersonales.hallazgos[0].tipo").value("DNI"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM respuesta", Long.class)).isZero();
+
+        mvc.perform(post("/api/quejas/" + queja + "/respuesta")
+                        .header("Authorization", "Bearer " + login("representante@example.test"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(new ObjectMapper().writeValueAsString(
+                                Map.of("texto", texto, "confirmarDatosPersonales", true))))
+                .andExpect(status().isAccepted());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM respuesta", Long.class)).isOne();
     }
 
     @Test

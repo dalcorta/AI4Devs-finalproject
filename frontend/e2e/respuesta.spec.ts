@@ -24,6 +24,26 @@ test("sin sesión, el panel de la empresa lleva a ingresar", async ({ page }) =>
   await expect(page).toHaveURL("/login");
 });
 
+test("una respuesta con datos del consumidor muestra el aviso antes de publicarse", async ({ page }) => {
+  const { email, clave } = leerEstado().empresa;
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Contraseña").fill(clave);
+  await page.getByRole("button", { name: "Ingresar" }).click();
+  await expect(page).toHaveURL("/empresa");
+
+  const formulario = page.getByRole("form", { name: `Responder la queja ${quejaId}` });
+  await formulario.getByLabel("Respuesta pública").fill("Llamamos al cliente al 11 4567-8901 y no atendió.");
+  await formulario.getByRole("button", { name: "Publicar respuesta" }).click();
+
+  const aviso = formulario.getByRole("alert");
+  await expect(aviso.getByText("11 4567-8901")).toBeVisible();
+  await expect(aviso.getByText("Teléfono")).toBeVisible();
+  // No se guardó nada: la fila sigue ofreciendo responder.
+  await page.reload();
+  await expect(page.getByRole("form", { name: `Responder la queja ${quejaId}` })).toBeVisible();
+});
+
 test("la empresa responde y la respuesta se ve verificada en la vista pública", async ({ page }) => {
   const { email, clave } = leerEstado().empresa;
   await page.goto("/login");

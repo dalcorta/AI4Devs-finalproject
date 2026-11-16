@@ -14,7 +14,7 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties("libroabierto")
 public record LibroAbiertoProperties(@Valid @NotNull Ipfs ipfs, @Valid @NotNull Blockchain blockchain,
         @Valid @NotNull Worker worker, @Valid @NotNull Listener listener, @Valid @NotNull Triage triage,
-        @Valid @NotNull Auth auth) {
+        @Valid @NotNull Auth auth, @Valid @DefaultValue Privacidad privacidad) {
 
     public record Ipfs(@NotBlank String apiUrl) {
     }
@@ -59,6 +59,21 @@ public record LibroAbiertoProperties(@Valid @NotNull Ipfs ipfs, @Valid @NotNull 
             return "Triage[habilitado=" + habilitado + ", intervalo=" + intervalo + ", modelo=" + modelo + ", lote="
                     + lote + ", apiKey=***]";
         }
+    }
+
+    /**
+     * HU-06: detección de datos personales antes de publicar. Lee texto todavía privado, así que el modelo es siempre
+     * local (Ollama); {@code PrivacidadConfig} no arranca si la URL apunta fuera de la máquina o de la red privada.
+     *
+     * @param llmHabilitado si es {@code false}, solo se buscan patrones y el autor siempre tiene que confirmar
+     * @param ollamaUrl URL de la API de Ollama
+     * @param modelo modelo de Ollama que busca nombres de personas
+     * @param timeout cuánto se espera al modelo antes de seguir solo con los patrones
+     */
+    public record Privacidad(@DefaultValue("true") boolean llmHabilitado,
+            @DefaultValue("http://127.0.0.1:11434") @NotBlank String ollamaUrl,
+            @DefaultValue("qwen2.5:1.5b") @NotBlank String modelo,
+            @DefaultValue("PT20S") @NotNull Duration timeout) {
     }
 
     /**

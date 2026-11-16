@@ -28,6 +28,18 @@ services:
     ports:
       - "127.0.0.1:8545:8545"
 
+  # HU-06: modelo local para detectar nombres de personas antes de publicar. Va en un perfil aparte porque necesita
+  # cerca de 1,5 GB de RAM: `docker compose --profile pii up -d` y, la primera vez,
+  # `docker compose exec ollama ollama pull qwen2.5:1.5b`. Sin él, la revisión usa solo patrones y pide confirmar.
+  ollama:
+    image: docker.io/ollama/ollama:0.5.7
+    profiles: ["pii"]
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+
 volumes:
   postgres-data:
   ipfs-data:
+  ollama-data:

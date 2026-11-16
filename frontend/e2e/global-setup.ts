@@ -20,6 +20,7 @@ import {
   POSTGRES,
   PUERTO_BACKEND,
   PUERTO_FRONTEND,
+  PUERTO_OLLAMA,
   RPC_URL,
 } from "./entorno";
 
@@ -97,6 +98,7 @@ async function exigirServiciosDeCompose() {
   for (const [puerto, quien] of [
     [PUERTO_BACKEND, "backend"],
     [PUERTO_FRONTEND, "frontend"],
+    [PUERTO_OLLAMA, "Ollama falso"],
   ] as const) {
     if (await responde(`http://127.0.0.1:${puerto}`)) {
       throw new Error(`El puerto ${puerto} (${quien} de los E2E) ya está en uso`);
@@ -206,6 +208,17 @@ async function armarEntorno() {
     stdio: "inherit",
   });
 
+  // HU-06: un Ollama falso que reconoce nombres de una lista fija; ningún E2E baja ni corre un modelo.
+  const ollama = lanzar(
+    "ollama-falso",
+    process.execPath,
+    [join(FRONTEND, "e2e", "ollama-falso.mjs"), String(PUERTO_OLLAMA)],
+    FRONTEND,
+    {},
+  );
+  const OLLAMA_URL = `http://127.0.0.1:${PUERTO_OLLAMA}`;
+  await esperar("Ollama falso", () => responde(`${OLLAMA_URL}/`), 10, ollama);
+
   const backend = lanzar("backend", "java", ["-Xmx384m", "-jar", "target/backend-0.1.0-SNAPSHOT.jar"], BACKEND, {
     SERVER_PORT: String(PUERTO_BACKEND),
     DB_URL: `jdbc:postgresql://127.0.0.1:5432/${BASE_E2E}`,
@@ -218,6 +231,7 @@ async function armarEntorno() {
     OFFICER_PRIVATE_KEY: OFFICER_KEY,
     JWT_SECRET: randomBytes(48).toString("base64"),
     TRIAGE_HABILITADO: "false",
+    PII_OLLAMA_URL: OLLAMA_URL,
     WORKER_INTERVALO: "PT1S",
     LISTENER_INTERVALO: "PT1S",
     LISTENER_BLOQUE_INICIAL: String(bloque),
@@ -239,7 +253,7 @@ async function armarEntorno() {
     ciudadana: await crearUsuario("CIUDADANO"),
     funcionaria: await crearUsuario("FUNCIONARIO"),
     empresa: await crearUsuario("EMPRESA"),
-    pids: [backend.pid!, frontend.pid!],
+    pids: [backend.pid!, frontend.pid!, ollama.pid!],
   };
   writeFileSync(ARCHIVO_ESTADO, JSON.stringify(estado, null, 2));
 }

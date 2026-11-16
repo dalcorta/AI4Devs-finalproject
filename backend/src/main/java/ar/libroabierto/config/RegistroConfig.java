@@ -10,6 +10,7 @@ import ar.libroabierto.complaint.application.RegistrarQueja;
 import ar.libroabierto.complaint.application.RegistroDeQuejas;
 import ar.libroabierto.complaint.application.ResponderQueja;
 import ar.libroabierto.complaint.application.Respuestas;
+import ar.libroabierto.privacidad.application.RevisarDatosPersonales;
 import java.time.Clock;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -24,8 +25,8 @@ public class RegistroConfig {
 
     @Bean
     RegistrarQueja registrarQueja(Denunciantes denunciantes, EmpresaRepository empresas, RegistroDeQuejas registro,
-            Clock reloj) {
-        return new RegistrarQueja(denunciantes, empresas, registro, reloj);
+            RevisarDatosPersonales revisor, Clock reloj) {
+        return new RegistrarQueja(denunciantes, empresas, registro, revisor, reloj);
     }
 
     @Bean
@@ -39,7 +40,7 @@ public class RegistroConfig {
     }
 
     @Bean
-    ResponderQueja responderQueja(Respuestas respuestas, Clock reloj) {
-        return new ResponderQueja(respuestas, reloj);
+    ResponderQueja responderQueja(Respuestas respuestas, RevisarDatosPersonales revisor, Clock reloj) {
+        return new ResponderQueja(respuestas, revisor, reloj);
     }
 }
