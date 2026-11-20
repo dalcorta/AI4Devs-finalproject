@@ -297,7 +297,7 @@ cd frontend && npm test && npm run typecheck && npm run build
 cd frontend && npx playwright install chromium && npm run test:e2e   # requiere compose levantado y forge build
 ```
 
-`forge build` va antes que los tests de backend y frontend que despliegan el contrato en Anvil. Al revisar resultados conviene mirar también la cantidad de tests por clase: sin Foundry instalado, las clases de Web3j del backend terminan con 0 tests ejecutados en vez de figurar como omitidas.
+`forge build` va antes que los tests de backend y frontend que despliegan el contrato en Anvil. Al revisar resultados conviene mirar también la cantidad de tests por clase: sin Foundry instalado, las clases de Web3j del backend terminan con 0 tests ejecutados en vez de figurar como omitidas. Con Podman, si algún test de backend falla con "Broken pipe" al crear su contenedor, es el apagado por inactividad del servicio de Podman, no el código: `CLAUDE.md` explica cómo correr la suite sin ese corte.
 
 ---
 

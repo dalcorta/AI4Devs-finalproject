@@ -58,6 +58,14 @@ Los tests de integración usan Testcontainers y **fallan** (no se omiten) si no 
 cd backend && DOCKER_HOST=unix:///run/user/$(id -u)/podman/podman.sock mvn test
 ```
 
+Si la suite falla al crear un contenedor con `Could not create/start container` y `IOException: Tubería rota` (`Broken pipe`), no es un error del código. El servicio que activa `podman.socket` se apaga tras 5 segundos sin pedidos, y Testcontainers reutiliza una conexión que ya se cerró: pasa con la clase que arranca su contexto después de una pausa. La salida es correr la suite contra un servicio sin ese apagado, en un socket aparte (la ruta tiene que tener menos de 108 caracteres):
+
+```bash
+podman system service --time=0 unix:///run/user/$(id -u)/podman-tests.sock &
+cd backend && DOCKER_HOST=unix:///run/user/$(id -u)/podman-tests.sock mvn test
+kill %1
+```
+
 Al revisar resultados, mirar también el conteo de tests omitidos (`skipped`), no solo que no haya fallos. Cada contexto de Spring de los tests levanta su propio PostgreSQL; `src/test/resources/spring.properties` limita la caché a 2 contextos para que la suite entre en una máquina de 4 GB.
 
 `Web3jBlockchainGatewayTest` levanta un Anvil real y despliega el artefacto de `contracts/out/`: correr `forge build` antes.
