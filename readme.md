@@ -96,14 +96,45 @@ Pantallas previstas:
 
 ### **1.4. Instrucciones de instalación:**
 
-_Pendiente (Entrega 2)._ Se prevé un único comando:
+**Requisitos:** Docker o Podman (con `docker compose` o `podman-compose`), [Foundry](https://getfoundry.sh) 1.9, Java 21 con Maven y Node 22 o superior (Vitest 5 y jsdom 31 no corren en Node 20).
+
+**1. Servicios locales** (PostgreSQL, Kubo y Anvil; los puertos quedan solo en 127.0.0.1):
 
 ```bash
-cp .env.example .env
-docker compose up -d   # postgres, ipfs (kubo), anvil; con --profile pii, también ollama (HU-06)
-make deploy-contract   # despliega ComplaintRegistry en la cadena local
-make seed              # usuarios y empresas de prueba
+docker compose up -d                  # o: podman-compose up -d
+docker compose --profile pii up -d    # opcional, HU-06: agrega Ollama (~1,5 GB de RAM)
+docker compose exec ollama ollama pull qwen2.5:1.5b   # solo la primera vez, si se usa el perfil pii
 ```
+
+**2. Contrato.** Compilar y desplegar `ComplaintRegistry` en Anvil. Las claves son cuentas de prueba que Anvil imprime al arrancar (`docker compose logs anvil`): la cuenta 0 despliega y las cuentas 1 y 2 hacen de relayer y de funcionario.
+
+```bash
+cd contracts && git submodule update --init && npm install && forge build
+PRIVATE_KEY=<clave cuenta 0> RELAYER_ADDR=<dirección cuenta 1> OFFICER_ADDR=<dirección cuenta 2> \
+  forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast
+```
+
+**3. Backend** (puerto 8081). Las variables sin valor por defecto son obligatorias; el resto está en `backend/src/main/resources/application.yml`.
+
+```bash
+cd backend
+CONTRACT_ADDRESS=<dirección impresa por el deploy> \
+RELAYER_PRIVATE_KEY=<clave cuenta 1> OFFICER_PRIVATE_KEY=<clave cuenta 2> \
+JWT_SECRET=<32 bytes o más> \
+ANTHROPIC_API_KEY=<clave> \
+mvn spring-boot:run
+```
+
+Para trabajar sin LLM de triage, reemplazar `ANTHROPIC_API_KEY` por `TRIAGE_HABILITADO=false`. Sin el perfil `pii`, agregar `PII_LLM_HABILITADO=false`: la revisión de HU-06 usa solo patrones y pide confirmación siempre.
+
+**4. Frontend** (puerto 3000):
+
+```bash
+cd frontend && cp .env.example .env.local   # ajustar NEXT_PUBLIC_CONTRACT_ADDRESS si no es la del primer deploy
+npm install && npm run dev
+```
+
+**Usuarios de prueba.** _Pendiente:_ todavía no hay script de seed. Los E2E crean sus propios usuarios y empresas en una base aparte (`frontend/e2e/global-setup.ts`); para usar la aplicación a mano hay que insertar usuarios en la tabla `usuario` con la clave en BCrypt. Los comandos para correr los tests están en [2.6](#26-tests).
 
 ---
 
@@ -123,7 +154,7 @@ flowchart LR
         ANC[Servicio de anclaje<br/>Web3j relayer]
         LST[Listener de eventos<br/>Web3j]
         TRI[Worker de triage<br/>outbox poller + cliente LLM]
-        MOCK[Mock Organismo<br/>Defensa del Consumidor]
+        MOCK[Mock Organismo<br/>Defensa del Consumidor<br/>pendiente]
     end
 
     DB[(PostgreSQL)]
@@ -166,18 +197,18 @@ flowchart LR
 
 | Componente | Tecnología | Responsabilidad |
 |---|---|---|
-| Smart contract `ComplaintRegistry` | Solidity 0.8.x, OpenZeppelin `AccessControl`, Foundry | Registrar quejas (hash, CID, CUIT), registrar cambios de estado, emitir eventos. Roles: `RELAYER_ROLE`, `OFFICER_ROLE`. |
-| Frontend | Next.js (TypeScript), viem, Tailwind | Formularios, consulta pública, panel del funcionario y verificación de integridad en el navegador. |
-| API REST | Spring Boot 3, Java 21, Spring Security (JWT) | Casos de uso, autenticación y autorización por rol, validación. Persiste la queja como `PENDIENTE`; no publica ni ancla de forma síncrona. |
+| Smart contract `ComplaintRegistry` | Solidity 0.8.24, OpenZeppelin 5 `AccessControl`, Foundry | Registrar quejas (hash, CID, CUIT), cambios de estado y una respuesta de empresa por queja; emitir eventos. Roles: `RELAYER_ROLE`, `OFFICER_ROLE`. |
+| Frontend | Next.js 16, React 19, TypeScript, viem; CSS propio (sin framework) | Formularios, consulta pública, paneles del funcionario y de la empresa, y verificación de integridad en el navegador. |
+| API REST | Spring Boot 3.5, Java 21, Spring Security (JWT HS256) | Casos de uso, autenticación y autorización por rol, validación. Persiste la queja como `PENDIENTE`; no publica ni ancla de forma síncrona. |
 | Worker de publicación | Spring `@Scheduled` (patrón outbox) | Toma quejas `PENDIENTE`, publica el JSON público en IPFS, calcula el `content_hash` canónico y dispara el anclaje. |
 | Servicio de anclaje | Web3j | Construye, firma y envía transacciones; guarda `tx_hash` y confirma bloques. |
-| Listener | Web3j (polling de `eth_getLogs` por lotes de bloques + checkpoint) | Detecta `ComplaintFiled` y `StatusChanged`; correlaciona el evento con la queja por `content_hash`; es idempotente y se recupera desde el último bloque procesado. |
+| Listener | Web3j (polling de `eth_getLogs` por lotes de bloques + checkpoint) | Detecta `ComplaintFiled`, `StatusChanged` y `ResponseFiled`; correlaciona el evento con la queja por `content_hash`; es idempotente y se recupera desde el último bloque procesado. |
 | Servicio de triage | SDK oficial de Anthropic para Java (`anthropic-java`), modelo Claude, detrás del puerto `LlmClient` | Prompt de extracción con salida JSON validada contra un esquema y contra una lista cerrada de artículos de la Ley 24.240; reintentos ante salidas inválidas. |
 | Base de datos | PostgreSQL 16, Flyway | Datos de usuarios, quejas, triage, historial de estados y checkpoint del listener. |
-| Almacenamiento público | IPFS (Kubo en local, Pinata en despliegue) | Documento JSON público de cada queja y evidencias públicas. |
+| Almacenamiento público | IPFS (Kubo en local, Pinata en despliegue) | Documento JSON público de cada queja y de cada respuesta de empresa. Las evidencias públicas están previstas pero no implementadas. |
 | LLM (triage) | Proveedor por API en el despliegue (texto ya público, tras confirmar on-chain) | Clasifica, resume y prioriza. Solo procesa el **texto público** de la queja, nunca datos personales. |
 | Detección de datos personales (should-have) | Patrones deterministas + Ollama local (`qwen2.5:1.5b` por defecto), siempre, sin importar el proveedor del triage | HU-06: revisa la descripción de la queja y el texto de la respuesta de la empresa **antes** de guardarlos, cuando todavía no son públicos; por eso el modelo corre siempre en local y la aplicación no arranca si su URL apunta fuera de la máquina o de la red privada. |
-| Mock organismo (should-have) | Módulo Spring | Simula la recepción de un expediente y devuelve un número de trámite. |
+| Mock organismo (should-have, _pendiente_) | Módulo Spring | Simulará la recepción de un expediente y devolverá un número de trámite. Todavía no está implementado. |
 
 ### **2.3. Descripción de alto nivel del proyecto y estructura de ficheros**
 
@@ -188,21 +219,26 @@ libroabierto/
 │   ├── test/ComplaintRegistry.t.sol
 │   └── script/Deploy.s.sol
 ├── backend/                   # Spring Boot, arquitectura hexagonal por módulo
-│   └── src/main/java/.../
-│       ├── complaint/         # dominio, casos de uso, adaptadores REST y JPA
-│       ├── anchoring/         # puerto BlockchainGateway + adaptador Web3j
+│   └── src/main/java/ar/libroabierto/
+│       ├── complaint/         # dominio, casos de uso, adaptadores REST, JPA/JDBC e IPFS
+│       ├── anchoring/         # puerto BlockchainGateway + adaptadores Web3j
 │       ├── listener/          # lectura de eventos por polling y checkpoint
 │       ├── triage/            # puerto LlmClient + prompt y validación de salida
-│       ├── identity/          # auth JWT, roles, mock de verificación de identidad
-│       └── shared/            # hashing canónico (JCS + keccak256), config
+│       ├── privacidad/        # detección de datos personales antes de publicar (HU-06)
+│       ├── identity/          # login, JWT y roles
+│       ├── config/            # configuración de Spring y propiedades
+│       └── shared/            # hashing canónico (JCS + keccak256)
 ├── frontend/                  # Next.js (app router)
 │   ├── app/                   # páginas
+│   ├── components/            # badge de verificación y aviso de datos personales
 │   ├── lib/verify.ts          # verificación de integridad en el navegador
-│   └── tests/e2e/             # Playwright
-├── docs/                      # diagramas, ADRs
-├── compose.yaml               # PostgreSQL, Kubo y Anvil para desarrollo local
-├── Readme.md
-└── Prompts.md
+│   ├── tests/                 # unitarios (Vitest)
+│   └── e2e/                   # Playwright
+├── shared/test-vectors/       # vectores del hash canónico, compartidos por backend y frontend
+├── compose.yaml               # PostgreSQL, Kubo, Anvil y (perfil pii) Ollama para desarrollo local
+├── CLAUDE.md                  # reglas para trabajar con IA en el repo
+├── readme.md
+└── prompts.md
 ```
 
 El backend sigue una **arquitectura hexagonal** por módulo: el dominio no conoce Web3j ni el proveedor del LLM. Esto permite reemplazar la red (testnet → BFA) o el modelo (Ollama → API) cambiando solo el adaptador.
@@ -211,7 +247,7 @@ El backend sigue una **arquitectura hexagonal** por módulo: el dominio no conoc
 
 ### **2.4. Infraestructura y despliegue**
 
-**Local (desarrollo):** `docker compose` con PostgreSQL, Kubo (IPFS), Anvil (cadena EVM local), Ollama, backend y frontend.
+**Local (desarrollo):** `compose.yaml` levanta PostgreSQL, Kubo (IPFS) y Anvil (cadena EVM local), y Ollama con el perfil `pii`. El backend y el frontend corren fuera de compose (ver [1.4](#14-instrucciones-de-instalación)).
 
 **Despliegue (Entrega final):**
 | Pieza | Destino previsto |
@@ -222,27 +258,39 @@ El backend sigue una **arquitectura hexagonal** por módulo: el dominio no conoc
 | IPFS | Pinata (pinning) |
 | LLM | Proveedor por API (solo recibe texto ya público) |
 
-**Pipeline CI (GitHub Actions):** `forge test` → tests del backend (con Testcontainers) → build del frontend → tests E2E con Playwright contra el entorno de docker compose.
+**Pipeline CI (GitHub Actions, _pendiente_: todavía no hay workflow en el repo):** `forge test` → tests del backend (con Testcontainers) → build del frontend → tests E2E con Playwright contra el entorno de docker compose.
 
 ### **2.5. Seguridad**
 
 - **Minimización de datos:** DNI, nombre, email y teléfono solo viven en PostgreSQL. IPFS y la blockchain reciben únicamente contenido público y hashes. Esto evita publicar datos personales en un medio sin posibilidad de supresión.
-- **Cifrado en reposo** de las columnas sensibles (DNI, teléfono) con una clave fuera del repositorio.
+- **Cifrado en reposo** de las columnas sensibles (DNI, teléfono) con una clave fuera del repositorio. _Pendiente:_ las columnas `dni_cifrado` y `telefono_cifrado` existen, pero ningún flujo del MVP las escribe ni las lee (`UsuarioEntity` no las mapea), así que todavía no hay cifrado implementado.
 - **Clave privada del relayer** gestionada por variable de entorno o secret manager, nunca en el código. El rol `RELAYER_ROLE` solo permite **agregar** registros.
 - **Control de acceso por roles** (CIUDADANO, FUNCIONARIO, EMPRESA) en la API y en el contrato (`OFFICER_ROLE` para cambios de estado).
-- **Validación de entrada** (Bean Validation, validación de CUIT con dígito verificador, límites de tamaño de texto y archivos).
+- **Validación de entrada** en los casos de uso (CUIT con dígito verificador, campos obligatorios, límites de tamaño de texto, montos y fechas), con errores por campo en la respuesta 400. La configuración se valida al arrancar con Bean Validation.
 - **Detección de datos personales antes de publicar (HU-06):** patrones para DNI, CUIL, email, teléfono, tarjeta y CBU, y un modelo local (Ollama) para nombres de personas. Si el modelo no responde, se avisa igual y el autor confirma; nunca se da por limpio un texto que no se pudo revisar.
 - **Mitigación de prompt injection:** el texto del usuario va delimitado como dato; la salida del LLM se valida contra un JSON Schema y se descarta si no cumple. El LLM no tiene herramientas ni acceso a datos privados.
-- **Anti-spam:** límite de quejas por usuario por día y rate limiting por IP.
+- **Anti-spam:** límite de 5 quejas por usuario por día (respuesta 429). _Pendiente:_ rate limiting por IP.
 - **Datos de prueba:** el entorno de evaluación usa CUITs y personas ficticias.
 
 ### **2.6. Tests**
 
-_Pendiente de implementación._ Estrategia prevista:
-- **Contrato (Foundry):** registro de queja, rechazo sin rol, cambio de estado válido e inválido, emisión de eventos.
-- **Unitarios backend (JUnit 5):** hashing canónico, validación de CUIT, parsing y validación de la salida del LLM, máquina de estados de la queja.
-- **Integración (Testcontainers):** API + PostgreSQL + Anvil; el listener procesa un evento real y es idempotente ante eventos repetidos.
-- **E2E (Playwright):** ciudadano registra una queja → aparece en la consulta pública con badge "verificada" → el funcionario la ve triageada y cambia su estado.
+| Suite | Herramienta | Qué cubre | Tests |
+|---|---|---|---|
+| Contrato | Foundry | Registro de queja, `contentHash` duplicado, rechazo sin rol, transiciones válidas e inválidas, respuesta única por queja, eventos | 16 |
+| Backend | JUnit 5, Testcontainers (PostgreSQL, Kubo), Anvil real | Dominio (CUIT, máquina de estados, documento público), casos de uso, hash canónico con vectores compartidos, esquema Flyway, adaptadores Web3j, IPFS y Ollama, listener idempotente, triage con LLM simulado, API HTTP y un test de aceptación del recorrido completo (`PublicacionDeQuejaE2ETest`) | 310 |
+| Frontend | Vitest | Hash canónico con los mismos vectores, verificación de queja y de respuesta, lectura del contrato contra un Anvil real, badge, aviso de datos personales | 59 |
+| E2E | Playwright | Contra el entorno de compose: acceso por rol, queja nueva con aviso de datos personales, verificación, "Integridad comprometida" con contenido o hash manipulados, IPFS caído, cambio de estado del funcionario, respuesta de la empresa | 14 |
+
+Todas pasan en la rama `feature/entrega-2-da` (0 fallos, 0 omitidos). Los tests nunca llaman al LLM real: usan un LLM simulado, un servidor HTTP local o `e2e/ollama-falso.mjs`.
+
+```bash
+cd contracts && forge build && forge test
+cd backend && mvn test        # con Podman rootless: DOCKER_HOST=unix:///run/user/$(id -u)/podman/podman.sock
+cd frontend && npm test && npm run typecheck && npm run build
+cd frontend && npx playwright install chromium && npm run test:e2e   # requiere compose levantado y forge build
+```
+
+`forge build` va antes que los tests de backend y frontend que despliegan el contrato en Anvil. Al revisar resultados conviene mirar también la cantidad de tests por clase: sin Foundry instalado, las clases de Web3j del backend terminan con 0 tests ejecutados en vez de figurar como omitidas.
 
 ---
 
@@ -280,7 +328,7 @@ erDiagram
         date fecha_hecho "NOT NULL"
         varchar estado "NOT NULL"
         varchar ipfs_cid "NULL hasta publicar"
-        char content_hash "NULL hasta publicar, 0x + 64 hex"
+        varchar content_hash UK "NULL hasta publicar, 0x + 64 hex"
         bigint onchain_id UK "NULL hasta confirmar"
         varchar anchor_status "NOT NULL: PENDIENTE | ENVIADA | CONFIRMADA | FALLIDA"
         timestamptz created_at "NOT NULL"
@@ -320,7 +368,7 @@ erDiagram
         uuid autor_id FK "NOT NULL, interno"
         text texto "NOT NULL, max 3000"
         varchar ipfs_cid "NULL hasta publicar"
-        char content_hash UK "NULL hasta publicar, 0x + 64 hex"
+        varchar content_hash UK "NULL hasta publicar, 0x + 64 hex"
         varchar tx_hash "NULL hasta anclar"
         varchar anchor_status "NOT NULL: PENDIENTE | ENVIADA | CONFIRMADA | FALLIDA"
         timestamptz created_at "NOT NULL"
@@ -392,10 +440,10 @@ La respuesta de la empresa la firma también el relayer: la empresa no tiene cla
 
 ### **3.2. Descripción de entidades principales:**
 
-- **USUARIO:** persona que usa el sistema, con un rol. Contiene los únicos datos personales del sistema; el DNI y el teléfono se guardan cifrados. `identidad_verificada` simula la verificación con MiBA en el MVP.
+- **USUARIO:** persona que usa el sistema, con un rol. Contiene los únicos datos personales del sistema; el DNI y el teléfono están previstos cifrados, pero ningún flujo del MVP los carga todavía (ver [2.5](#25-seguridad)). `identidad_verificada` simula la verificación con MiBA en el MVP.
 - **EMPRESA:** entidad denunciada, identificada por su CUIT único (validado con dígito verificador).
 - **QUEJA:** núcleo del dominio. Guarda la versión de trabajo de la queja y las referencias a su publicación (`ipfs_cid`, `content_hash`, `onchain_id`). `estado` sigue la máquina de estados `REGISTRADA → EN_REVISION → DERIVADA → RESUELTA | DESESTIMADA`. `content_hash` se calcula y persiste *antes* de enviar la transacción de anclaje, y es la clave que el listener usa para encontrar esta fila al recibir el evento `ComplaintFiled` (que no trae el UUID interno).
-- **EVIDENCIA:** archivos públicos adjuntos a una queja (fotos del producto, capturas), publicados en IPFS. Las facturas con datos personales no se publican.
+- **EVIDENCIA:** archivos públicos adjuntos a una queja (fotos del producto, capturas), publicados en IPFS. Las facturas con datos personales no se publican. _Pendiente:_ la tabla existe, pero todavía no hay endpoint para subir evidencias, así que `evidencias_cids` del documento público sale siempre vacío.
 - **TRIAGE:** resultado del LLM, en relación 1 a 1 con la queja. Guarda el modelo usado y los intentos, para trazabilidad. En estado `MANUAL` ("Triage manual") ninguna salida del LLM pasó la validación tras los reintentos, y no lleva los campos sugeridos.
 - **CAMBIO_ESTADO:** historial auditable de transiciones; cada una se ancla on-chain y guarda su `tx_hash`.
 - **RESPUESTA:** respuesta pública de la empresa denunciada (HU-05), una por queja. Se publica y se ancla como la queja, con su propio `content_hash` para que el listener la encuentre al recibir `ResponseFiled`. `autor_id` (el usuario que respondió) es interno: no va a IPFS ni a la API pública.
@@ -577,7 +625,8 @@ paths:
 
   /api/quejas/{id}/evidencias:
     post:
-      summary: Adjuntar evidencia pública a una queja (rol CIUDADANO, dueño de la queja)
+      summary: Adjuntar evidencia pública a una queja (rol CIUDADANO, dueño de la queja). PENDIENTE, no implementado
+      description: Diseñado para el MVP pero todavía no implementado en el backend; hoy la ruta se rechaza, porque SeguridadConfig niega todo lo que no permite explícitamente
       security: [{ bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -866,8 +915,8 @@ Criterios de aceptación:
 - **Tareas:**
   - `V1__init.sql` con todas las tablas, PK, FK, `UNIQUE` (`empresa.cuit`, `queja.onchain_id`, `queja.content_hash`, `triage.queja_id`, `transaccion_blockchain.tx_hash`) y `CHECK` para los enums.
   - Índices: `queja(empresa_id, created_at DESC)`, `queja(estado)`, `triage(prioridad)`.
-  - Configurar el cifrado de `dni_cifrado` con un `AttributeConverter` JPA y una clave por variable de entorno.
-  - Script de seed con usuarios de prueba (ciudadano, funcionario, empresa) y 3 empresas ficticias.
+  - Configurar el cifrado de `dni_cifrado` con un `AttributeConverter` JPA y una clave por variable de entorno. _Pendiente_ (ver [2.5](#25-seguridad)).
+  - Script de seed con usuarios de prueba (ciudadano, funcionario, empresa) y 3 empresas ficticias. _Pendiente:_ por ahora solo los E2E crean usuarios de prueba, en su propia base.
 - **Criterios de aceptación:** `flyway migrate` corre limpio sobre una base vacía; un test con Testcontainers verifica las restricciones (CUIT duplicado → error; triage duplicado → error).
 
 **Ticket 2 — [Smart Contract] ComplaintRegistry**

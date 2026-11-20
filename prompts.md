@@ -666,3 +666,23 @@ Resultado:
 1. **Garantías comprobadas rompiéndolas a propósito:** dar por completa una revisión con el modelo caído, aceptar un nombre que no está en el texto, no validar la salida contra el esquema, saltear la revisión al registrar o al responder, aceptar cualquier URL como local, tomar montos como DNI e incluir el cuerpo de Ollama en un error. Cada rotura hizo fallar su test.
 2. **Una mutación sobrevivió y cambió el diseño.** Quitar el chequeo del dígito verificador del CUIL no rompía ningún test. Al mirarlo, el chequeo era contraproducente: un CUIL mal tipeado no se avisaba, y lleva el DNI en el medio. Se escribió el test ("un CUIL mal tipeado igual se avisa"), falló, y se quitó el chequeo.
 3. **No probado con un modelo real:** Ollama no está instalado en esta máquina y todos los tests usan modelos falsos. Queda pendiente probar `qwen2.5:1.5b` con `docker compose --profile pii` y ajustar el prompt si hace falta.
+
+---
+
+## Revisión — Alinear el readme con el código de la Entrega 2 (Claude Code)
+
+**Prompt**
+```
+arregla las diferencias entre el readme y el código
+```
+
+Antes de editar, se corrieron las cuatro suites en una máquina limpia (16 de contrato, 310 de backend, 59 de frontend y 14 E2E, todas en verde) y se contrastó cada sección del readme con el código. Siguiendo la regla de CLAUDE.md de que el readme es la fuente de verdad, lo no implementado **no se borró del diseño**: se marcó como pendiente.
+
+Cambios en `readme.md`:
+1. **Instalación (1.4):** se reemplazó el borrador con `make deploy-contract` y `make seed` (no existen) por los pasos reales: compose, `forge script` para desplegar, variables obligatorias del backend y `.env.local` del frontend. Se aclaró que todavía no hay script de seed.
+2. **Estructura de ficheros (2.3):** se agregaron `privacidad/`, `config/`, `components/`, `shared/test-vectors/` y `CLAUDE.md`; los E2E están en `frontend/e2e/`; se quitó `docs/`, que no existe; nombres reales `readme.md` y `prompts.md`.
+3. **Componentes (2.2) y diagrama:** versiones reales del stack, sin Tailwind; el listener también procesa `ResponseFiled`; el mock del organismo y las evidencias quedan como pendientes.
+4. **Infraestructura (2.4):** compose no levanta backend ni frontend; el pipeline de CI todavía no está configurado.
+5. **Seguridad (2.5):** cifrado de DNI y teléfono y rate limiting por IP, pendientes; la validación de entrada está en los casos de uso, no en Bean Validation.
+6. **Tests (2.6):** de "pendiente de implementación" a la tabla de suites con sus resultados y comandos.
+7. **Modelo de datos y API:** `content_hash` es `varchar` único; `POST /api/quejas/{id}/evidencias` y el seed del Ticket 1 se marcaron como no implementados.
