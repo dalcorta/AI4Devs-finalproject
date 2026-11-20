@@ -28,7 +28,18 @@ class JdbcConsultasPublicas implements ConsultasPublicas {
 
     private static final RowMapper<QuejaResumen> RESUMEN = (rs, i) -> new QuejaResumen(
             rs.getObject("id", UUID.class), onchainId(rs), rs.getString("ipfs_cid"), rs.getString("content_hash"),
-            rs.getString("estado"), rs.getString("categoria_declarada"), rs.getObject("fecha_hecho", LocalDate.class));
+            rs.getString("estado"), rs.getString("categoria_declarada"), rs.getObject("fecha_hecho", LocalDate.class),
+            rs.getString("tx_hash"));
+
+    // Columnas públicas de la queja más la transacción de registro confirmada. Solo la confirmada: un reintento del
+    // worker puede dejar envíos que nunca se minaron, y el enlace tiene que llevar a la transacción real.
+    private static final String COLUMNAS_QUEJA = """
+            SELECT q.id, q.onchain_id, q.ipfs_cid, q.content_hash, q.estado, q.categoria_declarada, q.fecha_hecho,
+                   (SELECT t.tx_hash FROM transaccion_blockchain t
+                    WHERE t.tipo = 'REGISTRO' AND t.referencia_id = q.id AND t.estado = 'CONFIRMADA'
+                    ORDER BY t.created_at DESC LIMIT 1) AS tx_hash
+            FROM queja q
+            """;
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -64,11 +75,9 @@ class JdbcConsultasPublicas implements ConsultasPublicas {
         if (empresa.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(jdbc.query("""
-                SELECT id, onchain_id, ipfs_cid, content_hash, estado, categoria_declarada, fecha_hecho
-                FROM queja
-                WHERE empresa_id = :empresa
-                ORDER BY created_at DESC, id
+        return Optional.of(jdbc.query(COLUMNAS_QUEJA + """
+                WHERE q.empresa_id = :empresa
+                ORDER BY q.created_at DESC, q.id
                 LIMIT :tamanio OFFSET :desde""",
                 Map.of("empresa", empresa.get(0), "tamanio", tamanio, "desde", (long) pagina * tamanio), RESUMEN));
     }
@@ -76,9 +85,7 @@ class JdbcConsultasPublicas implements ConsultasPublicas {
     @Override
     @Transactional(readOnly = true)
     public Optional<QuejaDetalle> queja(UUID id) {
-        List<QuejaResumen> quejas = jdbc.query("""
-                SELECT id, onchain_id, ipfs_cid, content_hash, estado, categoria_declarada, fecha_hecho
-                FROM queja WHERE id = :id""", Map.of("id", id), RESUMEN);
+        List<QuejaResumen> quejas = jdbc.query(COLUMNAS_QUEJA + "WHERE q.id = :id", Map.of("id", id), RESUMEN);
         if (quejas.isEmpty()) {
             return Optional.empty();
         }
@@ -97,7 +104,7 @@ class JdbcConsultasPublicas implements ConsultasPublicas {
                 (rs, i) -> new RespuestaDeEmpresa(rs.getString("anchor_status"), rs.getString("tx_hash"),
                         rs.getTimestamp("created_at").toInstant())).stream().findFirst().orElse(null);
         return Optional.of(new QuejaDetalle(queja.id(), queja.onchainId(), queja.ipfsCid(), queja.contentHash(),
-                queja.estado(), historial, evidencias, respuesta));
+                queja.txHash(), queja.estado(), historial, evidencias, respuesta));
     }
 
     private static Long onchainId(ResultSet rs) throws SQLException {

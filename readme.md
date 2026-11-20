@@ -277,8 +277,8 @@ El backend sigue una **arquitectura hexagonal** por módulo: el dominio no conoc
 | Suite | Herramienta | Qué cubre | Tests |
 |---|---|---|---|
 | Contrato | Foundry | Registro de queja, `contentHash` duplicado, rechazo sin rol, transiciones válidas e inválidas, respuesta única por queja, eventos | 16 |
-| Backend | JUnit 5, Testcontainers (PostgreSQL, Kubo), Anvil real | Dominio (CUIT, máquina de estados, documento público), casos de uso, hash canónico con vectores compartidos, esquema Flyway, adaptadores Web3j, IPFS y Ollama, listener idempotente, triage con LLM simulado, API HTTP y un test de aceptación del recorrido completo (`PublicacionDeQuejaE2ETest`) | 310 |
-| Frontend | Vitest | Hash canónico con los mismos vectores, verificación de queja y de respuesta, lectura del contrato contra un Anvil real, badge, aviso de datos personales | 59 |
+| Backend | JUnit 5, Testcontainers (PostgreSQL, Kubo), Anvil real | Dominio (CUIT, máquina de estados, documento público), casos de uso, hash canónico con vectores compartidos, esquema Flyway, adaptadores Web3j, IPFS y Ollama, listener idempotente, triage con LLM simulado, API HTTP y un test de aceptación del recorrido completo (`PublicacionDeQuejaE2ETest`) | 311 |
+| Frontend | Vitest | Hash canónico con los mismos vectores, verificación de queja y de respuesta, lectura del contrato contra un Anvil real, badge, enlace a transacciones, aviso de datos personales | 62 |
 | E2E | Playwright | Contra el entorno de compose: acceso por rol, queja nueva con aviso de datos personales, verificación, "Integridad comprometida" con contenido o hash manipulados, IPFS caído, cambio de estado del funcionario, respuesta de la empresa | 14 |
 
 Todas pasan en la rama `feature/entrega-2-da` (0 fallos, 0 omitidos). Los tests nunca llaman al LLM real: usan un LLM simulado, un servidor HTTP local o `e2e/ollama-falso.mjs`.
@@ -598,6 +598,10 @@ paths:
                   onchainId: { type: integer }
                   ipfsCid: { type: string }
                   contentHash: { type: string }
+                  txHash:
+                    type: string
+                    nullable: true
+                    description: Transacción de registro (fileComplaint) confirmada; null mientras no se confirme
                   estado: { type: string }
                   historialEstados:
                     type: array
@@ -674,6 +678,10 @@ paths:
                         onchainId: { type: integer }
                         ipfsCid: { type: string }
                         contentHash: { type: string }
+                        txHash:
+                          type: string
+                          nullable: true
+                          description: Transacción de registro confirmada, para el enlace al explorador (HU-02)
                         estado: { type: string }
                         categoria: { type: string }
                         fechaHecho: { type: string, format: date }

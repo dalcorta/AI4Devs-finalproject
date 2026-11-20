@@ -10,6 +10,8 @@ export type QuejaResumen = {
   estado: string;
   categoria: string;
   fechaHecho: string;
+  /** Transacción de registro confirmada, o null. Es informativa: la verificación lee el contrato por su cuenta. */
+  txHash: string | null;
 };
 
 export type CambioDeEstado = { estadoAnterior: string; estadoNuevo: string; txHash: string | null; createdAt: string };
@@ -19,6 +21,8 @@ export type QuejaDetalle = {
   onchainId: number | null;
   ipfsCid: string | null;
   contentHash: string | null;
+  /** Transacción de registro confirmada, o null; como en QuejaResumen. */
+  txHash: string | null;
   estado: string;
   historialEstados: CambioDeEstado[];
   evidenciasCids: string[];

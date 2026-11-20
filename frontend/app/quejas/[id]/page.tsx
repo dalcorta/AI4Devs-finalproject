@@ -3,9 +3,9 @@
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BadgeVerificacion } from "@/components/BadgeVerificacion";
+import { Tx } from "@/components/Tx";
 import { useVerificacion, useVerificacionDeRespuesta } from "@/components/useVerificacion";
 import { api, NoEncontrado, type QuejaDetalle } from "@/lib/api";
-import { enlaceTx } from "@/lib/config";
 
 type Documento = {
   empresa?: { cuit?: string; razon_social?: string };
@@ -51,20 +51,6 @@ function RespuestaDeLaEmpresa({ queja }: { queja: QuejaDetalle }) {
         </p>
       )}
     </section>
-  );
-}
-
-function Tx({ hash }: { hash: string | null }) {
-  if (!hash) {
-    return <span className="tenue">sin anclar</span>;
-  }
-  const enlace = enlaceTx(hash);
-  return enlace ? (
-    <a href={enlace} target="_blank" rel="noreferrer">
-      <code>{hash}</code>
-    </a>
-  ) : (
-    <code>{hash}</code>
   );
 }
 
@@ -149,6 +135,10 @@ export default function DetalleDeQueja() {
         <dd>{queja.ipfsCid ? <code>{queja.ipfsCid}</code> : <span className="tenue">sin publicar</span>}</dd>
         <dt>Hash del contenido</dt>
         <dd>{queja.contentHash ? <code>{queja.contentHash}</code> : <span className="tenue">sin calcular</span>}</dd>
+        <dt>Transacción de registro</dt>
+        <dd>
+          <Tx hash={queja.txHash} />
+        </dd>
         <dt>Estado</dt>
         <dd>{queja.estado}</dd>
       </dl>

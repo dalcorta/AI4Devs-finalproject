@@ -686,3 +686,22 @@ Cambios en `readme.md`:
 5. **Seguridad (2.5):** cifrado de DNI y teléfono y rate limiting por IP, pendientes; la validación de entrada está en los casos de uso, no en Bean Validation.
 6. **Tests (2.6):** de "pendiente de implementación" a la tabla de suites con sus resultados y comandos.
 7. **Modelo de datos y API:** `content_hash` es `varchar` único; `POST /api/quejas/{id}/evidencias` y el seed del Ticket 1 se marcaron como no implementados.
+
+---
+
+## Implementación — Enlace a la transacción de registro (HU-02) (Claude Code)
+
+**Prompt**
+```
+queda algo de las historias de usuario ?
+Sí, agregarlo
+```
+
+Al contrastar los criterios de aceptación de HU-01 a HU-06 con el código, quedaba uno sin cumplir en HU-02: el listado de una empresa debía mostrar "enlace a la transacción". El hash del `fileComplaint` se guardaba en `transaccion_blockchain` (tipo `REGISTRO`), pero ninguna consulta pública lo devolvía, y el detalle tampoco lo mostraba. Ningún test lo cubría.
+
+Resultado:
+- **Backend:** `QuejaResumen` y `QuejaDetalle` traen `txHash`. `JdbcConsultasPublicas` lo lee con una subconsulta que toma **solo la transacción confirmada**: un reintento del worker puede dejar envíos que nunca se minaron, y el enlace tiene que llevar a la real. Test primero en `ConsultaPublicaApiTest` (un envío abandonado y uno confirmado → se devuelve el confirmado; una queja pendiente → sin `txHash`); falló y después pasó.
+- **Frontend:** `Tx` pasó a `components/Tx.tsx` y se usa en el listado (con el estado de la queja, que el criterio también pide) y en "Datos de verificación" del detalle. Test unitario del componente con y sin explorador, y el E2E de verificación ahora comprueba estado y hash en el listado y el mismo hash en el detalle.
+- **Readme:** `txHash` agregado a `GET /api/empresas/{cuit}/quejas` y `GET /api/quejas/{id}`.
+
+El `txHash` es informativo: la verificación de integridad sigue leyendo CID y hash del contrato y no depende de este dato del backend.

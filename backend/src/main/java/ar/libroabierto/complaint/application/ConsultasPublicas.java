@@ -25,13 +25,21 @@ public interface ConsultasPublicas {
     record EmpresaResumen(String cuit, String razonSocial) {
     }
 
-    /** Sin anclar todavía, onchainId, ipfsCid y contentHash son nulos: el frontend la muestra "Pendiente de anclaje". */
+    /**
+     * Sin anclar todavía, onchainId, ipfsCid y contentHash son nulos: el frontend la muestra "Pendiente de anclaje".
+     *
+     * @param txHash transacción de registro ({@code fileComplaint}) ya confirmada, o nula: una enviada que no se
+     *               confirmó puede no haberse minado nunca
+     */
     record QuejaResumen(UUID id, Long onchainId, String ipfsCid, String contentHash, String estado, String categoria,
-            LocalDate fechaHecho) {
+            LocalDate fechaHecho, String txHash) {
     }
 
-    /** @param respuesta nula si la empresa no respondió; el texto no viaja acá, se lee de IPFS y se verifica */
-    record QuejaDetalle(UUID id, Long onchainId, String ipfsCid, String contentHash, String estado,
+    /**
+     * @param txHash    transacción de registro confirmada, igual que en {@link QuejaResumen}
+     * @param respuesta nula si la empresa no respondió; el texto no viaja acá, se lee de IPFS y se verifica
+     */
+    record QuejaDetalle(UUID id, Long onchainId, String ipfsCid, String contentHash, String txHash, String estado,
             List<CambioDeEstado> historialEstados, List<String> evidenciasCids, RespuestaDeEmpresa respuesta) {
     }
 

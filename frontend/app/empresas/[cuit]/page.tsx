@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BadgeVerificacion } from "@/components/BadgeVerificacion";
+import { Tx } from "@/components/Tx";
 import { useVerificacion } from "@/components/useVerificacion";
 import { api, NoEncontrado, type QuejaResumen, TAMANIO_PAGINA } from "@/lib/api";
 
@@ -13,7 +14,15 @@ function FilaQueja({ queja }: { queja: QuejaResumen }) {
     <li>
       <span>
         <Link href={`/quejas/${queja.id}`}>{queja.categoria}</Link>{" "}
-        <span className="tenue">· hecho del {queja.fechaHecho}</span>
+        <span className="tenue">
+          · hecho del {queja.fechaHecho} · {queja.estado}
+        </span>
+        {queja.txHash && (
+          <span className="tenue">
+            {" "}
+            · transacción <Tx hash={queja.txHash} />
+          </span>
+        )}
       </span>
       <BadgeVerificacion resultado={resultado} />
     </li>

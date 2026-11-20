@@ -49,6 +49,7 @@ class ConsultaPublicaApiTest {
         jdbc.update("DELETE FROM triage");
         jdbc.update("DELETE FROM respuesta");
         jdbc.update("DELETE FROM queja");
+        jdbc.update("DELETE FROM transaccion_blockchain");
         jdbc.update("DELETE FROM usuario");
         jdbc.update("DELETE FROM empresa");
         usuario = UUID.randomUUID();
@@ -164,6 +165,27 @@ class ConsultaPublicaApiTest {
     }
 
     @Test
+    void listadoYDetalleTraenLaTransaccionDeRegistroConfirmada() throws Exception {
+        UUID confirmada = queja(banco, "2026-10-01T12:00:00Z", "CONFIRMADA", 7L);
+        // Un primer envío que nunca se minó, y el que confirmó el listener: solo el confirmado es la transacción real.
+        transaccionDeRegistro(hash(500), confirmada, "ENVIADA", "2026-10-01T12:00:10Z");
+        transaccionDeRegistro(hash(501), confirmada, "CONFIRMADA", "2026-10-01T12:00:20Z");
+        UUID pendiente = queja(banco, "2026-10-02T12:00:00Z", "PENDIENTE", null);
+        transaccionDeRegistro(hash(502), pendiente, "ENVIADA", "2026-10-02T12:00:10Z");
+
+        mvc.perform(get("/api/empresas/30500010912/quejas"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].id").value(pendiente.toString()))
+                .andExpect(jsonPath("$.items[0].txHash").doesNotExist())
+                .andExpect(jsonPath("$.items[1].id").value(confirmada.toString()))
+                .andExpect(jsonPath("$.items[1].txHash").value(hash(501)));
+        mvc.perform(get("/api/quejas/" + confirmada))
+                .andExpect(jsonPath("$.txHash").value(hash(501)));
+        mvc.perform(get("/api/quejas/" + pendiente))
+                .andExpect(jsonPath("$.txHash").doesNotExist());
+    }
+
+    @Test
     void ningunaRespuestaPublicaExponeAlDenuncianteNiAlFuncionario() throws Exception {
         UUID id = queja(banco, "2026-10-01T12:00:00Z", "CONFIRMADA", 3L);
         jdbc.update("""
@@ -222,6 +244,13 @@ class ConsultaPublicaApiTest {
                 id, usuario, empresa, anchorStatus, confirmada ? "bafy-" + id : null,
                 confirmada ? hash(onchainId) : null, onchainId, creadaEn);
         return id;
+    }
+
+    private void transaccionDeRegistro(String txHash, UUID queja, String estado, String creadaEn) {
+        jdbc.update("""
+                INSERT INTO transaccion_blockchain (id, tx_hash, tipo, referencia_id, estado, intentos, created_at)
+                VALUES (?, ?, 'REGISTRO', ?, ?, 1, ?::timestamptz)""", UUID.randomUUID(), txHash, queja, estado,
+                creadaEn);
     }
 
     private static String hash(long n) {

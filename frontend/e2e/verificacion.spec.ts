@@ -32,11 +32,16 @@ test("una queja registrada aparece verificada en la consulta pública, empezando
   // La empresa puede tener otras quejas (las de otros specs): se mira la fila de esta.
   const fila = page.getByRole("listitem").filter({ has: page.locator(`a[href="/quejas/${quejaId}"]`) });
   await expect(fila.getByRole("status")).toHaveText("Verificada");
+  // HU-02: estado y transacción de registro en el listado (Anvil no tiene explorador: el hash va sin enlace).
+  await expect(fila).toContainText("REGISTRADA");
+  const tx = (await fila.locator("code").textContent()) ?? "";
+  expect(tx).toMatch(/^0x[0-9a-f]{64}$/);
 
   await fila.getByRole("link", { name: "telecomunicaciones" }).click();
   await expect(page).toHaveURL(`/quejas/${quejaId}`);
   await expect(badgeDeLaQueja(page)).toHaveText("Verificada");
   await expect(page.getByText(DESCRIPCION)).toBeVisible();
+  await expect(page.getByText(tx)).toBeVisible();
 });
 
 test("si el gateway sirve contenido manipulado, se ve «Integridad comprometida» y no el texto alterado", async ({
