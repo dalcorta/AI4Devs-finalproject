@@ -134,7 +134,13 @@ cd frontend && cp .env.example .env.local   # ajustar NEXT_PUBLIC_CONTRACT_ADDRE
 npm install && npm run dev
 ```
 
-**Usuarios de prueba.** _Pendiente:_ todavía no hay script de seed. Los E2E crean sus propios usuarios y empresas en una base aparte (`frontend/e2e/global-setup.ts`); para usar la aplicación a mano hay que insertar usuarios en la tabla `usuario` con la clave en BCrypt. Los comandos para correr los tests están en [2.6](#26-tests).
+**5. Datos de prueba.** Con el backend arrancado al menos una vez (Flyway crea el esquema), `scripts/seed.sql` carga 3 empresas ficticias y un usuario de cada rol: ciudadana con identidad verificada, funcionaria y representante de empresa. Las credenciales están en el encabezado del script. Se puede correr más de una vez sin duplicar nada:
+
+```bash
+docker compose exec -T postgres psql -U libroabierto -d libroabierto -v ON_ERROR_STOP=1 < scripts/seed.sql
+```
+
+El seed no crea quejas: se registran desde la aplicación (`/quejas/nueva`) para que pasen por IPFS y la cadena. Los E2E no usan este seed: crean sus propios usuarios en una base aparte (`frontend/e2e/global-setup.ts`). Los comandos para correr los tests están en [2.6](#26-tests).
 
 ---
 
@@ -235,6 +241,7 @@ libroabierto/
 │   ├── tests/                 # unitarios (Vitest)
 │   └── e2e/                   # Playwright
 ├── shared/test-vectors/       # vectores del hash canónico, compartidos por backend y frontend
+├── scripts/seed.sql           # datos de prueba para desarrollo local
 ├── compose.yaml               # PostgreSQL, Kubo, Anvil y (perfil pii) Ollama para desarrollo local
 ├── CLAUDE.md                  # reglas para trabajar con IA en el repo
 ├── readme.md
@@ -277,7 +284,7 @@ El backend sigue una **arquitectura hexagonal** por módulo: el dominio no conoc
 | Suite | Herramienta | Qué cubre | Tests |
 |---|---|---|---|
 | Contrato | Foundry | Registro de queja, `contentHash` duplicado, rechazo sin rol, transiciones válidas e inválidas, respuesta única por queja, eventos | 16 |
-| Backend | JUnit 5, Testcontainers (PostgreSQL, Kubo), Anvil real | Dominio (CUIT, máquina de estados, documento público), casos de uso, hash canónico con vectores compartidos, esquema Flyway, adaptadores Web3j, IPFS y Ollama, listener idempotente, triage con LLM simulado, API HTTP y un test de aceptación del recorrido completo (`PublicacionDeQuejaE2ETest`) | 311 |
+| Backend | JUnit 5, Testcontainers (PostgreSQL, Kubo), Anvil real | Dominio (CUIT, máquina de estados, documento público), casos de uso, hash canónico con vectores compartidos, esquema Flyway, adaptadores Web3j, IPFS y Ollama, listener idempotente, triage con LLM simulado, API HTTP y un test de aceptación del recorrido completo (`PublicacionDeQuejaE2ETest`), seed de datos de prueba | 315 |
 | Frontend | Vitest | Hash canónico con los mismos vectores, verificación de queja y de respuesta, lectura del contrato contra un Anvil real, badge, enlace a transacciones, aviso de datos personales | 62 |
 | E2E | Playwright | Contra el entorno de compose: acceso por rol, queja nueva con aviso de datos personales, verificación, "Integridad comprometida" con contenido o hash manipulados, IPFS caído, cambio de estado del funcionario, respuesta de la empresa | 14 |
 
@@ -924,7 +931,7 @@ Criterios de aceptación:
   - `V1__init.sql` con todas las tablas, PK, FK, `UNIQUE` (`empresa.cuit`, `queja.onchain_id`, `queja.content_hash`, `triage.queja_id`, `transaccion_blockchain.tx_hash`) y `CHECK` para los enums.
   - Índices: `queja(empresa_id, created_at DESC)`, `queja(estado)`, `triage(prioridad)`.
   - Configurar el cifrado de `dni_cifrado` con un `AttributeConverter` JPA y una clave por variable de entorno. _Pendiente_ (ver [2.5](#25-seguridad)).
-  - Script de seed con usuarios de prueba (ciudadano, funcionario, empresa) y 3 empresas ficticias. _Pendiente:_ por ahora solo los E2E crean usuarios de prueba, en su propia base.
+  - Script de seed con usuarios de prueba (ciudadano, funcionario, empresa) y 3 empresas ficticias: `scripts/seed.sql`, idempotente, cubierto por `SeedTest`.
 - **Criterios de aceptación:** `flyway migrate` corre limpio sobre una base vacía; un test con Testcontainers verifica las restricciones (CUIT duplicado → error; triage duplicado → error).
 
 **Ticket 2 — [Smart Contract] ComplaintRegistry**

@@ -26,6 +26,7 @@ Libro de quejas de consumo público y verificable: el contenido público de cada
 | `backend/` | Spring Boot 3.5, Java 21, Maven, arquitectura hexagonal por módulo | Tickets de publicación y anclaje, listener on-chain y triage con LLM completos, más `POST /api/quejas` (`RegistrarQueja`), login con JWT, los endpoints públicos de lectura (HU-02) el panel del funcionario con cambio de estado anclado on-chain (HU-04), la respuesta pública de la empresa (HU-05) y la detección de datos personales antes de publicar (HU-06, módulo `privacidad`) |
 | `frontend/` | Next.js 16, React 19, TypeScript 5.9, viem, Vitest, Playwright | Ticket 6 y panel del funcionario (HU-04): búsqueda, quejas de una empresa y detalle con verificación de integridad en el navegador (`lib/verify.ts`), login por rol, bandeja con cambio de estado, panel de la empresa con respuesta y su verificación en el detalle, formulario de queja del ciudadano (`/quejas/nueva`) con el aviso de datos personales; E2E contra el entorno de compose |
 | `shared/test-vectors/` | JSON | Vectores del hash canónico, usados por backend y frontend |
+| `scripts/` | SQL | `seed.sql`: datos de prueba para desarrollo local (3 empresas ficticias y un usuario por rol, idempotente). Las credenciales van en su encabezado y `SeedTest` las prueba contra el login: si se cambian, se regeneran los hashes BCrypt |
 
 Contratos (Foundry está en `~/.foundry/bin`):
 

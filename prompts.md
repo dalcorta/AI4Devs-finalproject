@@ -705,3 +705,22 @@ Resultado:
 - **Readme:** `txHash` agregado a `GET /api/empresas/{cuit}/quejas` y `GET /api/quejas/{id}`.
 
 El `txHash` es informativo: la verificación de integridad sigue leyendo CID y hash del contrato y no depende de este dato del backend.
+
+---
+
+## Implementación — Script de seed (Ticket 1) (Claude Code)
+
+**Prompt**
+```
+sí, haz el script de seed
+```
+
+El Ticket 1 pedía un seed con un usuario por rol y 3 empresas ficticias, y era lo que faltaba para usar la aplicación a mano: sin él no había con qué iniciar sesión.
+
+Decisiones:
+- **SQL plano (`scripts/seed.sql`)** y no un perfil de Spring ni un script de Node: corre con el `psql` del contenedor de compose, sin dependencias ni variables de entorno. Los hashes BCrypt van precalculados (generados con `bcryptjs`, como en los E2E), así no hace falta la extensión `pgcrypto`.
+- **Idempotente:** `ON CONFLICT DO NOTHING` por CUIT y por email; correrlo dos veces no duplica ni falla.
+- **Datos ficticios:** CUITs inventados con dígito verificador válido, emails en `.test`, sin DNI ni teléfono. No siembra quejas: tienen que pasar por la API para publicarse y anclarse.
+- **Credenciales en el encabezado del script**, con claves aleatorias. `SeedTest` las lee de ahí y las prueba contra `POST /api/auth/login`, así la documentación no puede quedar desactualizada respecto de los hashes.
+
+Test primero: `SeedTest` (carga, idempotencia, login con cada rol, datos ficticios) falló sin el archivo y pasó después. Además se probó el uso documentado con `psql` contra un Postgres real con las migraciones aplicadas: la primera corrida inserta 3 y 3, la segunda 0 y 0.
